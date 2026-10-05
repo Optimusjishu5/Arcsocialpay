@@ -1,19 +1,30 @@
 import { useState, useRef, useEffect } from 'react'
+import { toast } from 'sonner'
 import { motion, AnimatePresence } from 'framer-motion'
 import {
   Search, Plus, Send, ArrowLeft, Reply, Trash2, DollarSign, X,
   Check, CheckCheck, Clock, AlertCircle, MoreHorizontal
 } from 'lucide-react'
 import { isAddress } from 'viem'
+import { useWaitForTransactionReceipt } from 'wagmi'
 import { ConnectKitButton } from 'connectkit'
-import { useArcAccount, useUsdcBalance, useSendUsdc, ARC_CHAIN_ID } from '../hooks/useArcWallet'
+import { useArcAccount, useUsdcBalance, useSendUsdc, ARC_CHAIN_ID, USDC_ADDRESS } from '../hooks/useArcWallet'
 import { appStore, useAppStore } from '../store/appStore'
 import { Avatar } from './ui/Avatar'
 import { Button } from './ui/Button'
 import { Modal } from './ui/Modal'
 import { TxSpinner } from './ui/TxStatusBadge'
-import { formatAddress, formatChatTime, parseOnchainError } from '../utils/format'
-import type { Message, Conversation, PaymentMessage } from '../types'
+import { formatAddress, formatChatTime, parseOnchainError, ZERO_ADDRESS, AMOUNT_REGEX, isSameAddress } from '../utils/format'
+import { buildTxExplorerUrl } from '@/onchain-facts'
+import type { Message, Conversation, PaymentMessage } from '../types/index'
+
+function getBlockedRecipientReason(recipient: string, myAddress: string): string | null {
+  const lower = recipient.toLowerCase()
+  if (lower === ZERO_ADDRESS.toLowerCase()) return 'Cannot send to the zero address (0x000...000)'
+  if (lower === USDC_ADDRESS.toLowerCase()) return 'Cannot send to the USDC contract address'
+  if (lower === myAddress.toLowerCase()) return 'Cannot send to yourself'
+  return null
+}
 
 interface Props {
   initialConvId?: string
@@ -38,10 +49,10 @@ export function MessagesView({ initialConvId }: Props) {
   }
 
   const myConvs = conversations
-    .filter((c) => c.participants.includes(address!))
+    .filter((c) => c.participants.some((p) => isSameAddress(p, address!)))
     .filter((c) => {
       if (!search) return true
-      const other = c.participants.find((p) => p !== address) ?? ''
+      const other = c.participants.find((p) => !isSameAddress(p, address)) ?? ''
       return other.toLowerCase().includes(search.toLowerCase())
     })
 
@@ -150,7 +161,7 @@ function ConvItem({ conv, myAddress, isActive, onClick }: {
   isActive: boolean
   onClick: () => void
 }) {
-  const other = conv.participants.find((p) => p !== myAddress) ?? conv.participants[0]
+  const other = conv.participants.find((p) => !isSameAddress(p, myAddress)) ?? conv.participants[0]
   return (
     <button
       onClick={onClick}
@@ -171,7 +182,7 @@ function ConvItem({ conv, myAddress, isActive, onClick }: {
         </div>
         {conv.lastMessage && (
           <p className="text-xs truncate" style={{ color: 'var(--muted)' }}>
-            {conv.lastMessage.senderAddress === myAddress ? 'You: ' : ''}
+            {isSameAddress(conv.lastMessage.senderAddress, myAddress) ? 'You: ' : ''}
             {conv.lastMessage.paymentTx
               ? `Sent ${conv.lastMessage.paymentTx.amount} USDC`
               : conv.lastMessage.content}
@@ -196,14 +207,27 @@ function ChatPanel({ conv, myAddress, messages, onBack }: {
   messages: Message[]
   onBack: () => void
 }) {
-  const other = conv.participants.find((p) => p !== myAddress) ?? conv.participants[0]
+  const other = conv.participants.find((p) => !isSameAddress(p, myAddress)) ?? conv.participants[0]
   const [input, setInput] = useState('')
   const [replyTo, setReplyTo] = useState<Message | null>(null)
   const [showPayModal, setShowPayModal] = useState(false)
   const bottomRef = useRef<HTMLDivElement>(null)
+  const scrollRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
+    // Only auto-scroll when the user is already near the bottom, so reading
+    // history isn't yanked away. Use instant scrolling + rAF to avoid smooth-
+    // scroll jank on large histories.
+    const el = scrollRef.current
+    if (!el) {
+      bottomRef.current?.scrollIntoView({ behavior: 'auto', block: 'end' })
+      return
+    }
+    const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight
+    if (distanceFromBottom > 160) return
+    requestAnimationFrame(() => {
+      bottomRef.current?.scrollIntoView({ behavior: 'auto', block: 'end' })
+    })
   }, [messages.length])
 
   function sendMessage() {
@@ -246,7 +270,7 @@ function ChatPanel({ conv, myAddress, messages, onBack }: {
       </div>
 
       {/* Messages */}
-      <div className="flex-1 overflow-y-auto px-4 py-4 space-y-2">
+      <div ref={scrollRef} className="flex-1 overflow-y-auto px-4 py-4 space-y-2">
         {visibleMessages.length === 0 && (
           <div className="flex items-center justify-center py-12">
             <p className="text-sm" style={{ color: 'var(--muted)' }}>Start the conversation</p>
@@ -256,7 +280,7 @@ function ChatPanel({ conv, myAddress, messages, onBack }: {
           <MessageBubble
             key={msg.id}
             msg={msg}
-            isMine={msg.senderAddress === myAddress}
+            isMine={isSameAddress(msg.senderAddress, myAddress)}
             allMessages={messages}
             onReply={() => setReplyTo(msg)}
             onDelete={() => deleteMsg(msg.id)}
@@ -330,8 +354,6 @@ function MessageBubble({ msg, isMine, allMessages, onReply, onDelete }: {
   onReply: () => void
   onDelete: () => void
 }) {
-  const [_showActions, setShowActions] = useState(false)
-  void setShowActions
   const replyMsg = msg.replyToId ? allMessages.find((m) => m.id === msg.replyToId) : null
 
   return (
@@ -395,7 +417,7 @@ function MessageBubble({ msg, isMine, allMessages, onReply, onDelete }: {
 
 function PaymentBubble({ paymentTx, isMine }: { paymentTx: PaymentMessage; isMine: boolean }) {
   const statusColor = paymentTx.status === 'confirmed' ? 'var(--success)' : paymentTx.status === 'failed' ? 'var(--danger)' : '#a16207'
-  const explorerUrl = `https://explorer.testnet.arc.io/tx/${paymentTx.txHash}`
+  const explorerUrl = buildTxExplorerUrl(paymentTx.chainId || ARC_CHAIN_ID, paymentTx.txHash)
 
   return (
     <div className="rounded-2xl overflow-hidden min-w-[200px]"
@@ -440,38 +462,87 @@ function InChatPayModal({ open, onClose, convId, myAddress, recipient }: {
   const { send, hash, isPending, isConfirming, isSuccess, isError, error, reset } = useSendUsdc()
   const [amount, setAmount] = useState('')
   const [localError, setLocalError] = useState('')
+  const [receiptFailed, setReceiptFailed] = useState(false)
+  const pendingHashRef = useRef<string | null>(null)
+  // Snapshot recipient/amount at handleSend time so the effects below don't
+  // close over stale values if the user edits inputs while pending.
+  const paySnapshotRef = useRef<{ amount: string; recipient: string; convId: string; myAddress: string } | null>(null)
 
+  // Independent receipt read — isSuccess alone only means "receipt fetched".
+  const { data: receipt, isError: isReceiptError } = useWaitForTransactionReceipt({ hash })
+
+  // H1: record pending as soon as we have a hash (don't wait for confirmation).
   useEffect(() => {
-    if (isSuccess && hash) {
+    if (hash && pendingHashRef.current !== hash) {
+      pendingHashRef.current = hash
+      const snap = paySnapshotRef.current ?? { amount, recipient, convId, myAddress }
       const payTx: PaymentMessage = {
         txHash: hash,
-        amount,
-        sender: myAddress,
-        recipient,
-        status: 'confirmed',
+        amount: snap.amount,
+        sender: snap.myAddress,
+        recipient: snap.recipient,
+        status: 'pending',
         chainId: ARC_CHAIN_ID,
       }
-      appStore.sendMessage(convId, myAddress, `Sent ${amount} USDC`, undefined, payTx)
-      void refetch()
-      // defer non-setState calls to avoid cascade render warning
-      setTimeout(() => { onClose(); reset(); setAmount('') }, 0)
+      appStore.sendMessage(snap.convId, snap.myAddress, `Sent ${snap.amount} USDC`, undefined, payTx)
+      refetch().catch(() => toast.error('Failed to refresh balance'))
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isSuccess, hash])
+  }, [hash])
+
+  // H1: flip pending -> confirmed only on receipt.status === 'success', else failed.
+  useEffect(() => {
+    if (!hash) return
+    const snapConvId = paySnapshotRef.current?.convId ?? convId
+    if (receipt?.status === 'success') {
+      appStore.updatePaymentMessageStatus(snapConvId, hash, 'confirmed')
+      refetch().catch(() => toast.error('Failed to refresh balance'))
+      setReceiptFailed(false)
+      // defer non-setState calls to avoid cascade render warning
+      setTimeout(() => { onClose(); reset(); setAmount(''); setLocalError(''); pendingHashRef.current = null; paySnapshotRef.current = null }, 0)
+    } else if (receipt?.status === 'reverted' || isReceiptError) {
+      appStore.updatePaymentMessageStatus(snapConvId, hash, 'failed')
+      setReceiptFailed(true)
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [receipt, isReceiptError, hash, isSuccess])
 
   function handleSend() {
+    // M4: block double-submit.
+    if (isPending || isConfirming) return
     setLocalError('')
-    const n = parseFloat(amount)
-    if (!amount || isNaN(n) || n <= 0) { setLocalError('Enter a valid amount'); return }
+    setReceiptFailed(false)
+    // M8: recipient + self checks (also guards zero / USDC contract).
+    if (!isAddress(recipient)) { setLocalError('Invalid recipient address'); return }
+    const blocked = getBlockedRecipientReason(recipient, myAddress)
+    if (blocked) { setLocalError(blocked); return }
+    // H3: strict format first (empty, negative, >6 decimals, non-numeric).
+    const trimmed = amount.trim()
+    if (!trimmed || !AMOUNT_REGEX.test(trimmed)) {
+      if (!trimmed || isNaN(parseFloat(trimmed)) || parseFloat(trimmed) <= 0) {
+        setLocalError('Enter a valid amount')
+      } else {
+        setLocalError('Too many decimal places (max 6)')
+      }
+      return
+    }
+    const n = parseFloat(trimmed)
+    if (n <= 0) { setLocalError('Enter a valid amount'); return }
     const bal = Number(balanceRaw) / 1_000_000
     if (n > bal) { setLocalError('Insufficient balance'); return }
-    void send(recipient as `0x${string}`, amount)
+    paySnapshotRef.current = { amount: trimmed, recipient, convId, myAddress }
+    try {
+      void send(recipient as `0x${string}`, trimmed)
+    } catch (e) {
+      setLocalError(parseOnchainError(e))
+    }
   }
 
-  const errMsg = isError ? parseOnchainError(error) : localError
+  const baseErr = isError ? parseOnchainError(error) : ''
+  const errMsg = localError || (receiptFailed ? 'Transaction failed onchain (reverted).' : baseErr)
 
   return (
-    <Modal open={open} onClose={() => { if (!isPending && !isConfirming) { onClose(); reset(); setAmount('') } }} title="Send USDC in Chat">
+    <Modal open={open} onClose={() => { if (!isPending && !isConfirming) { onClose(); reset(); setAmount(''); setLocalError('') } }} title="Send USDC in Chat">
       <div className="space-y-4">
         <div className="flex items-center gap-3 p-3 rounded-xl" style={{ background: 'var(--surface-muted)' }}>
           <Avatar address={recipient} size={36} />
@@ -508,7 +579,7 @@ function InChatPayModal({ open, onClose, convId, myAddress, recipient }: {
             <TxSpinner text={isPending ? 'Confirm in wallet...' : 'Confirming...'} />
           </div>
         ) : (
-          <Button className="w-full" size="lg" onClick={handleSend} disabled={!amount}>
+          <Button className="w-full" size="lg" onClick={handleSend} disabled={!amount.trim() || isPending || isConfirming}>
             Send {amount || '0'} USDC
           </Button>
         )}
@@ -532,6 +603,8 @@ function NewChatModal({ open, onClose, myAddress, onCreated }: {
     setErr('')
     if (!isAddress(addr)) { setErr('Enter a valid wallet address'); return }
     if (addr.toLowerCase() === myAddress.toLowerCase()) { setErr('Cannot chat with yourself'); return }
+    if (addr.toLowerCase() === ZERO_ADDRESS.toLowerCase()) { setErr('Cannot chat with the zero address'); return }
+    if (addr.toLowerCase() === USDC_ADDRESS.toLowerCase()) { setErr('Cannot chat with the USDC contract address'); return }
     appStore.ensureProfile(addr)
     const conv = appStore.getOrCreateConversation(myAddress, addr)
     onCreated(conv.id)

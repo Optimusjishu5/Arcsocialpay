@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
+import { isAddress } from 'viem'
 import { useArcAccount } from './hooks/useArcWallet'
 import { appStore, useTheme } from './store/appStore'
 import { Dashboard } from './components/Dashboard'
@@ -9,7 +10,7 @@ import { SocialFeed } from './components/SocialFeed'
 import { ProfileView } from './components/ProfileView'
 import { NotificationsView } from './components/NotificationsView'
 import { DesktopNav, MobileNav, MobileTopBar } from './components/Navigation'
-import type { NavView } from './types'
+import type { NavView } from './types/index'
 
 const VIEW_TITLES: Record<NavView, string> = {
   home: 'Arc SocialPay',
@@ -29,11 +30,16 @@ export default function App() {
   const { theme } = useTheme()
   const { address } = useArcAccount()
   const [nav, setNav] = useState<NavState>(() => {
-    // Handle pay= query param for payment requests
-    const params = new URLSearchParams(window.location.search)
-    const payTo = params.get('pay')
-    if (payTo && /^0x[0-9a-fA-F]{40}$/.test(payTo)) {
-      return { view: 'pay', extra: { mode: 'send', recipient: payTo } }
+    // Handle ?pay= query param for payment request links (M5).
+    // Validate with isAddress (checksummed, case-insensitive) before prefilling.
+    try {
+      const params = new URLSearchParams(window.location.search)
+      const payTo = (params.get('pay') ?? '').trim()
+      if (payTo && isAddress(payTo)) {
+        return { view: 'pay', extra: { mode: 'send', recipient: payTo } }
+      }
+    } catch {
+      // ignore malformed URLs — fall through to home
     }
     return { view: 'home' }
   })
@@ -70,7 +76,9 @@ export default function App() {
       case 'pay':
         return (
           <PayView
+            key={`${nav.extra?.mode ?? 'send'}-${nav.extra?.recipient ?? 'no-recipient'}`}
             initialMode={(nav.extra?.mode as 'send' | 'receive') ?? 'send'}
+            initialRecipient={nav.extra?.recipient && isAddress(nav.extra.recipient) ? nav.extra.recipient : undefined}
             onNavigate={navigate}
           />
         )

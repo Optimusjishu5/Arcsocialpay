@@ -5,6 +5,7 @@ script = "contracts/script"
 out = "contracts/out"
 libs = ["lib"]
 cache_path = "contracts/cache"
+# Keep solc 0.8.28 / paris: contracts target Arc (pre-Cancun compatible EVM); do not bump without re-auditing bytecode.
 solc_version = "0.8.28"
 auto_detect_solc = false
 evm_version = "paris"
@@ -19,3 +20,10 @@ base_sepolia = "https://base-sepolia-rpc.publicnode.com"
 arbitrum = "https://arbitrum-one-rpc.publicnode.com"
 polygon = "https://polygon-bor-rpc.publicnode.com"
 optimism = "https://optimism-rpc.publicnode.com"
+arc_testnet = "https://rpc.testnet.arc.io"
+arc = "https://rpc.arc.network"
+
+# Verifier placeholder: set ARCSCAN_API_KEY in .env (see .env.example). URL is a placeholder until ArcScan publishes one.
+[etherscan]
+arc_testnet = { key = "${ARCSCAN_API_KEY}", url = "https://api.arcscan.app/api" }
+arc = { key = "${ARCSCAN_API_KEY}", url = "https://api.arcscan.app/api" }

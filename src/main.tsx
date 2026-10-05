@@ -23,7 +23,16 @@ import { config } from './config'
 import App from './App'
 import './index.css'
 
-const queryClient = new QueryClient()
+const queryClient = new QueryClient({
+  defaultOptions: {
+    queries: {
+      staleTime: 10_000,
+      retry: 1,
+      refetchOnWindowFocus: false,
+      refetchIntervalInBackground: false,
+    },
+  },
+})
 
 // Studio logo SVG
 const StudioLogo = () => (

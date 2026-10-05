@@ -35,7 +35,10 @@ export default defineConfig({
     ],
   },
   server: {
-    allowedHosts: true,
-    cors: true,
+    allowedHosts: ['localhost', '127.0.0.1'],
+    cors: false,
+  },
+  build: {
+    sourcemap: false,
   },
 })

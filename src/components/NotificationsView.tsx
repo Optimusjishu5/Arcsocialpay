@@ -2,17 +2,19 @@ import { useEffect } from 'react'
 import { motion } from 'framer-motion'
 import { Heart, MessageCircle, Repeat2, UserPlus, DollarSign, AtSign, Check } from 'lucide-react'
 import { useArcAccount } from '../hooks/useArcWallet'
-import { appStore, useAppStore } from '../store/appStore'
+import { appStore, useAppStore, filterNotificationsForAddress } from '../store/appStore'
 import { Avatar } from './ui/Avatar'
 import { EmptyState } from './ui/EmptyState'
 import { formatTimestamp, formatAddress } from '../utils/format'
-import type { Notification } from '../types'
+import type { Notification } from '../types/index'
 
 export function NotificationsView() {
-  const { isConnected } = useArcAccount()
+  const { address, isConnected } = useArcAccount()
   const { notifications } = useAppStore()
 
-  const myNotifs = notifications
+  // Scope to current address (case-insensitive); store keeps all-local notifs
+  // when no recipient field exists, so this is best-effort filtering.
+  const myNotifs = filterNotificationsForAddress(notifications, address)
 
   useEffect(() => {
     if (isConnected) {

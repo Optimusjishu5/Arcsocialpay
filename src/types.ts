@@ -1,3 +1,6 @@
+// DEPRECATED (P0 dual-store): legacy types. Modern types live in src/types/index.ts
+// (NavView, UserProfile, Post with authorAddress, etc.). Kept for legacy
+// components so `tsc --noEmit` still passes. Do not use for new code.
 // ── ArcSocial Core Types ──
 
 export type PostMediaType = 'image' | 'video' | 'link'

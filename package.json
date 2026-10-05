@@ -5,14 +5,19 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview",
     "deploy:self": "bun run ./scripts/self-deploy.ts",
     "compass:deploy": "bun run ./scripts/compass-deploy.ts",
     "fetch:abi": "bun run ./scripts/fetch-abi.ts",
     "lint": "oxlint --type-aware src scripts --fix; s=$?; oxlint --fix .; exit $((s>0?s:$?))",
+    "lint:check": "oxlint --type-aware src scripts; s=$?; oxlint .; exit $((s>0?s:$?))",
     "typecheck": "tsc --noEmit",
     "check": "bash scripts/check.sh",
     "contracts:build": "forge build",
-    "contracts:test": "forge test"
+    "contracts:test": "forge test",
+    "hardhat:compile": "hardhat compile",
+    "hardhat:test": "hardhat test"
   },
   "dependencies": {
     "@circle-fin/adapter-viem-v2": "^1.18.0",
@@ -40,17 +45,31 @@
     "viem": "^2.56.3"
   },
   "devDependencies": {
+    "@nomicfoundation/hardhat-chai-matchers": "^2.0.0",
+    "@nomicfoundation/hardhat-ethers": "^3.0.0",
+    "@types/chai": "^4.3.11",
+    "@types/mocha": "^10.0.7",
     "@types/node": "^24.0.0",
     "@types/react": "^18.3.12",
     "@types/react-dom": "^18.3.1",
     "@vitejs/plugin-react": "^4.3.4",
     "autoprefixer": "^10.4.20",
+    "chai": "^4.4.1",
+    "dotenv": "^16.4.5",
+    "ethers": "^6.13.0",
+    "hardhat": "^2.22.0",
     "oxlint": "^1.80.0",
     "oxlint-tsgolint": "^7.0.2001",
     "postcss": "^8.4.49",
     "tailwindcss": "^3.4.17",
+    "ts-node": "^10.9.2",
     "typescript": "~7.0.2",
     "vite": "^6.0.5",
     "vite-plugin-node-polyfills": "^0.22.0"
-  }
+  },
+  "//typescript-note": "TypeScript kept at ~7.0.2 (TS7 native, pairs with oxlint-tsgolint 7.x). Do NOT downgrade blindly; only pin to ^5.9 if `bun run typecheck` fails due to TS7.",
+  "engines": {
+    "bun": "1.3.x"
+  },
+  "packageManager": "bun@1.3.14"
 }

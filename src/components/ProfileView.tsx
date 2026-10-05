@@ -2,13 +2,13 @@ import { useState } from 'react'
 import { Edit3, Check, X, ExternalLink, UserPlus, UserMinus, MessageCircle, ArrowUpRight, ArrowDownLeft } from 'lucide-react'
 import { ConnectKitButton } from 'connectkit'
 import { useArcAccount, useUsdcBalance, ARC_CHAIN_ID } from '../hooks/useArcWallet'
-import { appStore, useAppStore } from '../store/appStore'
+import { appStore, useAppStore, filterTxHistoryForAddress, isSameAddress } from '../store/appStore'
 import { Avatar } from './ui/Avatar'
 import { Button } from './ui/Button'
 import { TxStatusBadge } from './ui/TxStatusBadge'
 import { formatAddress, formatTimestamp, getAvatarColor } from '../utils/format'
 import { buildAddressExplorerUrl, buildTxExplorerUrl } from '@/onchain-facts'
-import type { NavView } from '../types'
+import type { NavView } from '../types/index'
 
 interface Props {
   viewAddress?: string // if undefined: show own profile
@@ -18,7 +18,8 @@ interface Props {
 export function ProfileView({ viewAddress, onNavigate }: Props) {
   const { address, isConnected } = useArcAccount()
   const targetAddress = viewAddress ?? address
-  const isOwn = !viewAddress || viewAddress === address
+  const isOwn =
+    !viewAddress || (!!address && isSameAddress(viewAddress, address))
 
   const { display: balanceDisplay, isLoading: balLoading } = useUsdcBalance(targetAddress as `0x${string}`)
   const { posts, txHistory, followMap } = useAppStore()
@@ -28,8 +29,12 @@ export function ProfileView({ viewAddress, onNavigate }: Props) {
   const [editUsername, setEditUsername] = useState(profile?.username ?? '')
   const [editBio, setEditBio] = useState(profile?.bio ?? '')
 
-  const myPosts = posts.filter((p) => p.authorAddress === targetAddress)
-  const myTxs = txHistory.filter((t) => t.fromAddress === targetAddress || t.toAddress === targetAddress).slice(0, 10)
+  const myPosts = posts.filter(
+    (p) => targetAddress && isSameAddress(p.authorAddress, targetAddress),
+  )
+  // Activity filter only (DATA/INDEXING): scope txHistory to viewed address,
+  // case-insensitive. Do NOT touch editPost/profile logic here.
+  const myTxs = filterTxHistoryForAddress(txHistory, targetAddress).slice(0, 10)
   const isFollowing = address && targetAddress ? appStore.isFollowing(address, targetAddress) : false
   const [activeTab, setActiveTab] = useState<'posts' | 'activity'>('posts')
 
@@ -47,9 +52,10 @@ export function ProfileView({ viewAddress, onNavigate }: Props) {
   if (!targetAddress) return null
 
   function saveEdit() {
-    appStore.upsertProfile({
-      address: targetAddress!,
-      username: editUsername.trim() || formatAddress(targetAddress!),
+    if (!isOwn || !address || !targetAddress) return
+    appStore.upsertProfile(address, {
+      address: targetAddress,
+      username: editUsername.trim() || formatAddress(targetAddress),
       bio: editBio.trim(),
     })
     setEditing(false)
@@ -155,7 +161,13 @@ export function ProfileView({ viewAddress, onNavigate }: Props) {
             <Stat label="Posts" value={myPosts.length} />
             <Stat label="Balance" value={balLoading ? '...' : `$${balanceDisplay}`} isBalance />
             <Stat label="Followers" value={profile?.followerCount ?? 0} />
-            <Stat label="Following" value={(followMap[targetAddress] ?? []).length} />
+            <Stat
+              label="Following"
+              value={
+                (Object.entries(followMap).find(([k]) => isSameAddress(k, targetAddress!))?.[1] ??
+                  []).length
+              }
+            />
           </div>
         </div>
 
@@ -201,7 +213,7 @@ export function ProfileView({ viewAddress, onNavigate }: Props) {
               <p className="text-sm py-8 text-center" style={{ color: 'var(--muted)' }}>No transactions yet</p>
             ) : (
               myTxs.map((tx, i) => {
-                const isSent = tx.fromAddress === targetAddress
+                const isSent = isSameAddress(tx.fromAddress, targetAddress)
                 return (
                   <div key={tx.id}
                     className={`flex items-center gap-3 px-4 py-3 ${i < myTxs.length - 1 ? 'border-b' : ''}`}

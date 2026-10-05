@@ -404,3 +404,31 @@ function requireDecimals(amount: Amount, expected: number, view: string): void {
     );
   }
 }
+
+// ── App-local: max sendable (balance - feeBuffer, floored at 0) ─────────────
+// On Arc gas is paid in USDC, so a MAX send must leave a fee buffer.
+// Same-decimals only: mixing 6-dec ERC-20 and 18-dec gas views is a 10^12
+// error, so mismatched decimals throw instead of rescaling silently.
+// Verified sound: usdcToGasToken is exact widening 6->18; gasTokenToUsdc
+// truncates 18->6 by default (narrowing almost always has dust).
+export function maxSendable(balance: Amount, feeBuffer: Amount): Amount {
+  if (balance.decimals !== feeBuffer.decimals) {
+    throw new AmountError(
+      'DECIMALS_MISMATCH',
+      `Cannot subtract a ${feeBuffer.decimals}-decimal fee buffer from a ${balance.decimals}-decimal balance — ` +
+        'rescale one with toDecimals() first',
+    );
+  }
+  if (feeBuffer.raw < 0n) {
+    throw new AmountError('INVALID_NUMBER', 'Fee buffer cannot be negative');
+  }
+  const raw = balance.raw > feeBuffer.raw ? balance.raw - feeBuffer.raw : 0n;
+  return Amount.fromRaw(raw, balance.decimals);
+}
+
+/** Raw bigint variant: balanceRaw - feeBufferRaw floored at 0. Defaults to no buffer. */
+export function maxSendableRaw(balanceRaw: bigint, feeBufferRaw = 0n): bigint {
+  if (typeof balanceRaw !== 'bigint') return 0n;
+  if (typeof feeBufferRaw !== 'bigint' || feeBufferRaw < 0n) feeBufferRaw = 0n;
+  return balanceRaw > feeBufferRaw ? balanceRaw - feeBufferRaw : 0n;
+}

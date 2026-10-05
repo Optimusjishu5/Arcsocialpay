@@ -3,17 +3,18 @@ import { motion } from 'framer-motion'
 import { Plus, Hash, Lock, Globe, Users, Send, ArrowLeft, Settings, Crown } from 'lucide-react'
 import { ConnectKitButton } from 'connectkit'
 import { useArcAccount } from '../hooks/useArcWallet'
-import { appStore, useAppStore } from '../store/appStore'
+import { appStore, useAppStore, isSameAddress } from '../store/appStore'
 import { Avatar } from './ui/Avatar'
 import { Button } from './ui/Button'
 import { Modal } from './ui/Modal'
 import { EmptyState } from './ui/EmptyState'
 import { formatAddress, formatTimestamp, getAvatarColor } from '../utils/format'
-import type { Group } from '../types'
+import type { Group } from '../types/index'
 
 export function GroupsView() {
   const { address, isConnected } = useArcAccount()
-  const { groups, messages } = useAppStore()
+  // Subscribed (not getState in render): re-renders when groups/conversations/messages change.
+  const { groups, conversations, messages } = useAppStore()
   const [activeGroupId, setActiveGroupId] = useState<string | null>(null)
   const [showCreate, setShowCreate] = useState(false)
 
@@ -28,8 +29,14 @@ export function GroupsView() {
     )
   }
 
-  const myGroups = groups.filter((g) => g.memberAddresses.includes(address!))
-  const discoverGroups = groups.filter((g) => !g.memberAddresses.includes(address!))
+  const isMemberOf = (g: Group) =>
+    g.memberAddresses.some((a) => isSameAddress(a, address))
+  const isInvitedTo = (g: Group) =>
+    (g.invitedAddresses ?? []).some((a) => isSameAddress(a, address))
+  const myGroups = groups.filter((g) => isMemberOf(g))
+  const discoverGroups = groups.filter(
+    (g) => !isMemberOf(g) && (!g.isPrivate || isInvitedTo(g)),
+  )
   const activeGroup = activeGroupId ? groups.find((g) => g.id === activeGroupId) ?? null : null
 
   return (
@@ -82,26 +89,19 @@ export function GroupsView() {
 
       {/* Group content panel */}
       <div className={`flex-1 flex flex-col ${!activeGroupId ? 'hidden md:flex' : 'flex'}`}>
-        {activeGroup ? (
-          <GroupPanel
-            group={activeGroup}
-            myAddress={address!}
-            messages={(activeGroup
-              ? (() => {
-                  const conv = appStore.getState().conversations.find(
-                    (c) => c.isGroup && c.groupId === activeGroup.id
-                  )
-                  return conv ? (appStore.getState().messages[conv.id] ?? []) : []
-                })()
-              : [])}
-            convId={(() => {
-              const conv = appStore.getState().conversations.find(
-                (c) => c.isGroup && c.groupId === activeGroup.id
-              )
-              return conv?.id ?? ''
-            })()}
-            onBack={() => setActiveGroupId(null)}
-          />
+        {activeGroup ? (() => {
+          const conv = conversations.find((c) => c.isGroup && c.groupId === activeGroup.id)
+          const convMessages = conv ? (messages[conv.id] ?? []) : []
+          return (
+            <GroupPanel
+              group={activeGroup}
+              myAddress={address!}
+              messages={convMessages}
+              convId={conv?.id ?? ''}
+              onBack={() => setActiveGroupId(null)}
+            />
+          )
+        })()
         ) : (
           <div className="hidden md:flex flex-1 flex-col items-center justify-center gap-3" style={{ background: 'var(--bg)' }}>
             <div className="w-16 h-16 rounded-2xl flex items-center justify-center"
@@ -154,15 +154,15 @@ function GroupItem({ group, isActive, onClick }: { group: Group; isActive: boole
 function GroupPanel({ group, myAddress, messages, convId, onBack }: {
   group: Group
   myAddress: string
-  messages: import('../types').Message[]
+  messages: import('../types/index').Message[]
   convId: string
   onBack: () => void
 }) {
   const [input, setInput] = useState('')
   const [showInfo, setShowInfo] = useState(false)
   const bottomRef = useRef<HTMLDivElement>(null)
-  const isMember = group.memberAddresses.includes(myAddress)
-  const isAdmin = group.adminAddresses.includes(myAddress)
+  const isMember = group.memberAddresses.some((a) => isSameAddress(a, myAddress))
+  const isAdmin = group.adminAddresses.some((a) => isSameAddress(a, myAddress))
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
@@ -177,14 +177,11 @@ function GroupPanel({ group, myAddress, messages, convId, onBack }: {
 
   function join() {
     appStore.joinGroup(group.id, myAddress)
-    // Create conversation if needed
-    const existingConv = appStore.getState().conversations.find((c) => c.isGroup && c.groupId === group.id)
-    if (!existingConv) {
-      appStore.createGroup(group.ownerAddress, group.name, group.description, group.type, group.isPrivate)
-    }
   }
 
   function leave() {
+    // Owner cannot leave without transferring ownership (store enforces).
+    if (isSameAddress(group.ownerAddress, myAddress)) return
     appStore.leaveGroup(group.id, myAddress)
     onBack()
   }
@@ -237,7 +234,7 @@ function GroupPanel({ group, myAddress, messages, convId, onBack }: {
                   style={{ background: 'var(--surface-strong)', border: '1px solid var(--border)' }}>
                   <Avatar address={addr} size={16} />
                   <span style={{ color: 'var(--ink-2)' }}>{formatAddress(addr)}</span>
-                  {group.adminAddresses.includes(addr) && <Crown size={10} style={{ color: '#a16207' }} />}
+                  {group.adminAddresses.some((a) => isSameAddress(a, addr)) && <Crown size={10} style={{ color: '#a16207' }} />}
                 </div>
               ))}
               {group.memberAddresses.length > 6 && (
@@ -246,7 +243,7 @@ function GroupPanel({ group, myAddress, messages, convId, onBack }: {
                 </div>
               )}
             </div>
-            {isMember && !group.ownerAddress.includes(myAddress) && (
+            {isMember && !isSameAddress(group.ownerAddress, myAddress) && (
               <Button size="sm" variant="ghost" onClick={leave} className="text-[var(--danger)]">
                 Leave {group.type === 'channel' ? 'Channel' : 'Group'}
               </Button>
@@ -265,7 +262,7 @@ function GroupPanel({ group, myAddress, messages, convId, onBack }: {
           </div>
         )}
         {messages.filter((m) => !m.deletedForMe).map((msg) => {
-          const isMine = msg.senderAddress === myAddress
+          const isMine = isSameAddress(msg.senderAddress, myAddress)
           return (
             <div key={msg.id} className={`flex gap-2 ${isMine ? 'flex-row-reverse' : 'flex-row'}`}>
               <Avatar address={msg.senderAddress} size={32} />

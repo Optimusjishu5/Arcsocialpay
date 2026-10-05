@@ -14,7 +14,7 @@ import {
 
 const DEFAULT_CHAIN = 'ARC-TESTNET';
 
-const WORK_DIR = '/home/user/app';
+const WORK_DIR = process.cwd();
 const CONTRACTS_ROOT_DIR = `${WORK_DIR}/contracts`;
 /*
  * Solidity sources live directly under `contracts/` (no `contract-code/`

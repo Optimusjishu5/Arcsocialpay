@@ -1,15 +1,18 @@
-import { useState, useRef } from 'react'
+import { useState, useMemo, memo } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { Heart, MessageCircle, Repeat2, Share2, MoreHorizontal, Pencil, Trash2, X, Send, ChevronDown } from 'lucide-react'
 import { ConnectKitButton } from 'connectkit'
 import { useArcAccount } from '../hooks/useArcWallet'
-import { appStore, useAppStore } from '../store/appStore'
+import { appStore, useAppStore, isSameAddress } from '../store/appStore'
 import { Avatar } from './ui/Avatar'
 import { Button } from './ui/Button'
 import { EmptyState } from './ui/EmptyState'
 import { Modal } from './ui/Modal'
 import { formatAddress, formatTimestamp } from '../utils/format'
-import type { Post, Comment } from '../types'
+import { copyText } from '../utils/copy'
+import type { Post, Comment } from '../types/index'
+
+const FEED_PAGE_SIZE = 50
 
 export function SocialFeed() {
   const { address, isConnected } = useArcAccount()
@@ -18,15 +21,37 @@ export function SocialFeed() {
   const [editingPost, setEditingPost] = useState<Post | null>(null)
   const [openCommentsId, setOpenCommentsId] = useState<string | null>(null)
   const [filter, setFilter] = useState<'all' | 'following'>('all')
+  const [visibleCount, setVisibleCount] = useState(FEED_PAGE_SIZE)
 
-  const myFollowing = address ? (appStore.getState().followMap[address] ?? []) : []
+  const myFollowing = useMemo(() => {
+    if (!address) return []
+    const entry = Object.entries(appStore.getState().followMap).find(([k]) =>
+      isSameAddress(k, address),
+    )
+    return entry?.[1] ?? []
+  }, [address, posts])
 
-  const feedPosts = posts.filter((p) => {
-    if (filter === 'following' && address) {
-      return p.authorAddress === address || myFollowing.includes(p.authorAddress)
+  const feedPosts = useMemo(() => {
+    return posts.filter((p) => {
+      if (filter === 'following' && address) {
+        return (
+          isSameAddress(p.authorAddress, address) ||
+          myFollowing.some((a) => isSameAddress(a, p.authorAddress))
+        )
+      }
+      return true
+    })
+  }, [posts, filter, address, myFollowing])
+
+  const commentsByPost = useMemo(() => {
+    const map: Record<string, Comment[]> = {}
+    for (const c of comments) {
+      ;(map[c.postId] ??= []).push(c)
     }
-    return true
-  })
+    return map
+  }, [comments])
+
+  const visiblePosts = feedPosts.slice(0, visibleCount)
 
   return (
     <div className="flex flex-col gap-0 max-w-xl mx-auto pb-8">
@@ -83,17 +108,31 @@ export function SocialFeed() {
           description="Be the first to post something in the feed"
         />
       ) : (
-        feedPosts.map((post) => (
-          <PostCard
-            key={post.id}
-            post={post}
-            myAddress={address}
-            comments={comments.filter((c) => c.postId === post.id)}
-            isCommentsOpen={openCommentsId === post.id}
-            onToggleComments={() => setOpenCommentsId((prev) => prev === post.id ? null : post.id)}
-            onEdit={() => setEditingPost(post)}
-          />
-        ))
+        <>
+          {visiblePosts.map((post) => (
+            <PostCard
+              key={post.id}
+              post={post}
+              myAddress={address}
+              comments={commentsByPost[post.id] ?? []}
+              isCommentsOpen={openCommentsId === post.id}
+              onToggleComments={() => setOpenCommentsId((prev) => prev === post.id ? null : post.id)}
+              onEdit={() => setEditingPost(post)}
+            />
+          ))}
+          {feedPosts.length > visiblePosts.length && (
+            <div className="flex justify-center py-4">
+              <Button
+                size="sm"
+                variant="secondary"
+                onClick={() => setVisibleCount((n) => n + FEED_PAGE_SIZE)}
+              >
+                <ChevronDown size={14} />
+                Show more ({feedPosts.length - visiblePosts.length} remaining)
+              </Button>
+            </div>
+          )}
+        </>
       )}
 
       {/* Compose Modal */}
@@ -120,7 +159,7 @@ export function SocialFeed() {
 
 // ── Post Card ──────────────────────────────────────────────────────────────
 
-function PostCard({ post, myAddress, comments, isCommentsOpen, onToggleComments, onEdit }: {
+const PostCard = memo(function PostCard({ post, myAddress, comments, isCommentsOpen, onToggleComments, onEdit }: {
   post: Post
   myAddress: string | undefined
   comments: Comment[]
@@ -128,13 +167,21 @@ function PostCard({ post, myAddress, comments, isCommentsOpen, onToggleComments,
   onToggleComments: () => void
   onEdit: () => void
 }) {
-  const { posts } = useAppStore()
-  const isLiked = myAddress ? post.likes.includes(myAddress) : false
-  const isReposted = myAddress ? post.reposts.includes(myAddress) : false
-  const isOwn = myAddress === post.authorAddress
+  const isLiked = myAddress
+    ? post.likes.some((a) => isSameAddress(a, myAddress))
+    : false
+  const isReposted = myAddress
+    ? post.reposts.some((a) => isSameAddress(a, myAddress))
+    : false
+  const isOwn = !!myAddress && isSameAddress(post.authorAddress, myAddress)
   const [showMenu, setShowMenu] = useState(false)
 
-  const originalPost = post.repostOf ? posts.find((p) => p.id === post.repostOf) : null
+  // Avoid subscribing to the whole store here (which would re-render every
+  // card on any change). Look up the reposted original on demand; the card
+  // re-renders anyway when its own `post` prop changes.
+  const originalPost = post.repostOf
+    ? (appStore.getState().posts.find((p) => p.id === post.repostOf) ?? null)
+    : null
 
   function handleLike() {
     if (!myAddress) return
@@ -147,7 +194,8 @@ function PostCard({ post, myAddress, comments, isCommentsOpen, onToggleComments,
   }
 
   function handleDelete() {
-    appStore.deletePost(post.id)
+    if (!myAddress) return
+    appStore.deletePost(post.id, myAddress)
     setShowMenu(false)
   }
 
@@ -243,7 +291,7 @@ function PostCard({ post, myAddress, comments, isCommentsOpen, onToggleComments,
               label="Share"
               active={false}
               onClick={() => {
-                void navigator.clipboard.writeText(window.location.href)
+                void copyText(window.location.href, 'Link copied')
               }}
               hideCount
             />
@@ -265,9 +313,9 @@ function PostCard({ post, myAddress, comments, isCommentsOpen, onToggleComments,
       </div>
     </motion.div>
   )
-}
+})
 
-function ActionBtn({ icon, count, label, active, activeColor = 'var(--accent)', onClick, hideCount = false }: {
+const ActionBtn = memo(function ActionBtn({ icon, count, label, active, activeColor = 'var(--accent)', onClick, hideCount = false }: {
   icon: React.ReactNode
   count: number
   label: string
@@ -287,11 +335,11 @@ function ActionBtn({ icon, count, label, active, activeColor = 'var(--accent)', 
       {!hideCount && <span className="text-xs tabnum">{count > 0 ? count : ''}</span>}
     </button>
   )
-}
+})
 
 // ── Comments Section ───────────────────────────────────────────────────────
 
-function CommentsSection({ postId, comments, myAddress }: {
+const CommentsSection = memo(function CommentsSection({ postId, comments, myAddress }: {
   postId: string
   comments: Comment[]
   myAddress: string | undefined
@@ -345,7 +393,7 @@ function CommentsSection({ postId, comments, myAddress }: {
       )}
     </div>
   )
-}
+})
 
 // ── Compose Modal ──────────────────────────────────────────────────────────
 
@@ -361,7 +409,7 @@ function ComposeModal({ open, onClose, myAddress, editPost }: {
   function submit() {
     if (!content.trim()) return
     if (editPost) {
-      appStore.editPost(editPost.id, content.trim())
+      appStore.editPost(editPost.id, content.trim(), myAddress)
     } else {
       appStore.ensureProfile(myAddress)
       appStore.addPost(myAddress, content.trim())

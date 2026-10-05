@@ -1,3 +1,7 @@
+// DEPRECATED (P0 dual-store): legacy in-memory store. Modern app state lives in
+// src/store/appStore.ts. Kept for legacy components (PostCard/WalletView/TopBar/
+// BottomNav/Sidebar/FeedView/ExploreView/CommunitiesView/PostComposer) which are
+// not routed by src/App.tsx, so `tsc --noEmit` still passes. Do not use for new code.
 import { useState, useEffect, useRef } from 'react'
 import type {
   AppState, Post, User, Message, Conversation,

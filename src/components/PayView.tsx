@@ -1,23 +1,49 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { ArrowUpRight, ArrowDownLeft, Copy, Check, ExternalLink, QrCode, AlertCircle, X } from 'lucide-react'
 import { ConnectKitButton } from 'connectkit'
 import { isAddress } from 'viem'
-import { useArcAccount, useUsdcBalance, useSendUsdc, ARC_CHAIN_ID } from '../hooks/useArcWallet'
+import { useWaitForTransactionReceipt } from 'wagmi'
+import { toast } from 'sonner'
+import { useArcAccount, useUsdcBalance, useSendUsdc, ARC_CHAIN_ID, USDC_ADDRESS } from '../hooks/useArcWallet'
 import { appStore, useAppStore } from '../store/appStore'
 import { Button } from './ui/Button'
 import { TxStatusBadge, TxSpinner } from './ui/TxStatusBadge'
 import { Avatar } from './ui/Avatar'
-import { formatAddress, formatTimestamp, parseOnchainError } from '../utils/format'
+import { formatAddress, formatTimestamp, parseOnchainError, ZERO_ADDRESS, AMOUNT_REGEX, isSameAddress, maxSendableRaw, formatUsdcDisplay } from '../utils/format'
+import { copyText } from '../utils/copy'
 import { buildTxExplorerUrl } from '@/onchain-facts'
-import type { NavView } from '../types'
+import type { NavView } from '../types/index'
+
+// Keep 0.1 USDC back so the user can still pay gas (USDC is the gas token on Arc).
+const GAS_RESERVE_RAW = 100_000n // 0.1 USDC in 6-decimal units
+
+function isBlockedRecipient(recipient: string, myAddress: string): string | null {
+  const lower = recipient.toLowerCase()
+  if (lower === ZERO_ADDRESS.toLowerCase()) return 'Cannot send to the zero address (0x000...000)'
+  if (lower === USDC_ADDRESS.toLowerCase()) return 'Cannot send to the USDC contract address'
+  if (lower === myAddress.toLowerCase()) return 'Cannot send to your own address'
+  return null
+}
+
+function formatMaxWithReserve(balance: bigint): string {
+  // Exact bigint path (no Number/parseFloat): maxSendableRaw floors at 0.
+  // formatUsdcDisplay is grouped DISPLAY-ONLY, so strip commas for <input>.
+  const maxRaw = maxSendableRaw(balance, GAS_RESERVE_RAW)
+  if (maxRaw <= 0n) return '0'
+  const display = formatUsdcDisplay(maxRaw).replace(/,/g, '')
+  // Trim trailing zeros for clean input (e.g. "1.50" -> "1.5", "1.00" -> "1").
+  const trimmed = display.includes('.') ? display.replace(/\.?0+$/, '') : display
+  return trimmed === '' ? '0' : trimmed
+}
 
 interface Props {
   initialMode?: 'send' | 'receive'
+  initialRecipient?: string
   onNavigate: (view: NavView, extra?: Record<string, string>) => void
 }
 
-export function PayView({ initialMode = 'send', onNavigate: _onNavigate }: Props) {
+export function PayView({ initialMode = 'send', initialRecipient, onNavigate: _onNavigate }: Props) {
   const [mode, setMode] = useState<'send' | 'receive'>(initialMode)
   const { address, isConnected, isArcChain, switchToArc, isSwitching } = useArcAccount()
   const { display: balanceDisplay, raw: balanceRaw, refetch } = useUsdcBalance(address)
@@ -35,7 +61,7 @@ export function PayView({ initialMode = 'send', onNavigate: _onNavigate }: Props
   }
 
   const myTxs = txHistory.filter((t) =>
-    t.fromAddress === address || t.toAddress === address
+    isSameAddress(t.fromAddress, address) || isSameAddress(t.toAddress, address)
   )
 
   return (
@@ -75,7 +101,7 @@ export function PayView({ initialMode = 'send', onNavigate: _onNavigate }: Props
             animate={{ opacity: 1, x: 0 }}
             exit={{ opacity: 0, x: 20 }}
             transition={{ duration: 0.15 }}>
-            <SendForm balance={balanceRaw} balanceDisplay={balanceDisplay} onSuccess={() => { void refetch() }} myAddress={address!} />
+            <SendForm balance={balanceRaw} balanceDisplay={balanceDisplay} onSuccess={() => { refetch().catch(() => toast.error('Failed to refresh balance')) }} myAddress={address!} initialRecipient={initialRecipient} />
           </motion.div>
         ) : (
           <motion.div key="receive"
@@ -96,7 +122,7 @@ export function PayView({ initialMode = 'send', onNavigate: _onNavigate }: Props
           </div>
           <div className="divide-y" style={{ borderColor: 'var(--border)' }}>
             {myTxs.map((tx) => {
-              const isSent = tx.fromAddress === address
+              const isSent = isSameAddress(tx.fromAddress, address)
               return (
                 <div key={tx.id} className="flex items-center gap-3 px-4 py-3">
                   <div className="w-9 h-9 rounded-full flex items-center justify-center flex-shrink-0"
@@ -146,54 +172,109 @@ export function PayView({ initialMode = 'send', onNavigate: _onNavigate }: Props
 // ── Send Form ──────────────────────────────────────────────────────────────
 
 function SendForm({
-  balance, balanceDisplay, onSuccess, myAddress,
+  balance, balanceDisplay, onSuccess, myAddress, initialRecipient,
 }: {
   balance: bigint
   balanceDisplay: string
   onSuccess: () => void
   myAddress: string
+  initialRecipient?: string
 }) {
-  const [recipient, setRecipient] = useState('')
+  const [recipient, setRecipient] = useState(() =>
+    initialRecipient && isAddress(initialRecipient) ? initialRecipient : '',
+  )
   const [amount, setAmount] = useState('')
   const [note, setNote] = useState('')
   const [stage, setStage] = useState<'form' | 'preview' | 'done'>('form')
   const [localError, setLocalError] = useState('')
+  const [receiptFailed, setReceiptFailed] = useState(false)
+  const pendingRecordedRef = useRef<Set<string>>(new Set())
+  // Snapshot recipient/amount/note at handleSend time so hash effects don't
+  // close over stale values if the user edits inputs while pending.
+  const sendSnapshotRef = useRef<{ recipient: string; amount: string; note: string; fromAddress: string } | null>(null)
+  const { switchToArc, isSwitching } = useArcAccount()
+
+  // Prefill from ?pay= link when it arrives/changes.
+  useEffect(() => {
+    if (initialRecipient && isAddress(initialRecipient)) {
+      setRecipient(initialRecipient)
+    }
+  }, [initialRecipient])
 
   const {
     send, hash, isPending, isConfirming, isSuccess, isError, error, explorerUrl, isWrongChain, reset,
   } = useSendUsdc()
 
+  // Independent receipt read: useSendUsdc.isSuccess only means "receipt fetched",
+  // not "receipt succeeded". We gate confirmed on data.status === 'success'.
+  const { data: receipt, isError: isReceiptError } = useWaitForTransactionReceipt({ hash })
+
+  // H1: record pending as soon as we have a hash.
   useEffect(() => {
-    if (isSuccess && hash) {
-      appStore.addTxRecord({
-        txHash: hash,
-        chainId: ARC_CHAIN_ID,
-        direction: 'sent',
-        amount,
-        fromAddress: myAddress,
-        toAddress: recipient,
-        status: 'confirmed',
-        timestamp: Date.now(),
-        note,
-      })
-      onSuccess()
-      setTimeout(() => setStage('done'), 0)
+    if (hash && !pendingRecordedRef.current.has(hash)) {
+      pendingRecordedRef.current.add(hash)
+      const snap = sendSnapshotRef.current ?? { recipient, amount, note, fromAddress: myAddress }
+      try {
+        appStore.addTxRecord({
+          txHash: hash,
+          chainId: ARC_CHAIN_ID,
+          direction: 'sent',
+          amount: snap.amount,
+          fromAddress: snap.fromAddress,
+          toAddress: snap.recipient,
+          status: 'pending',
+          timestamp: Date.now(),
+          note: snap.note,
+        })
+      } catch {
+        // store is best-effort; onchain state is source of truth
+      }
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isSuccess, hash])
+  }, [hash])
+
+  // H1: only mark confirmed when receipt.status === 'success'; mark failed otherwise.
+  useEffect(() => {
+    if (!hash) return
+    if (receipt?.status === 'success') {
+      appStore.updateTxRecord(hash, { status: 'confirmed' })
+      onSuccess()
+      setReceiptFailed(false)
+      setTimeout(() => setStage('done'), 0)
+    } else if (receipt?.status === 'reverted' || (isSuccess && receipt && receipt.status !== 'success')) {
+      appStore.updateTxRecord(hash, { status: 'failed' })
+      setReceiptFailed(true)
+    } else if (isReceiptError && hash) {
+      appStore.updateTxRecord(hash, { status: 'failed' })
+      setReceiptFailed(true)
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [receipt, isSuccess, isReceiptError, hash])
 
   function validateAndPreview() {
     setLocalError('')
+    setReceiptFailed(false)
     if (!isAddress(recipient)) {
       setLocalError('Enter a valid Ethereum address (0x...)')
       return
     }
-    if (recipient.toLowerCase() === myAddress.toLowerCase()) {
-      setLocalError('Cannot send to your own address')
+    const blocked = isBlockedRecipient(recipient, myAddress)
+    if (blocked) {
+      setLocalError(blocked)
       return
     }
-    const amountNum = parseFloat(amount)
-    if (!amount || isNaN(amountNum) || amountNum <= 0) {
+    const trimmed = amount.trim()
+    if (!trimmed || !AMOUNT_REGEX.test(trimmed)) {
+      // Covers empty, negative, dust with >6 decimals, and non-numeric.
+      if (!trimmed || isNaN(parseFloat(trimmed)) || parseFloat(trimmed) <= 0) {
+        setLocalError('Enter a valid amount')
+      } else {
+        setLocalError('Too many decimal places (max 6)')
+      }
+      return
+    }
+    const amountNum = parseFloat(trimmed)
+    if (amountNum <= 0) {
       setLocalError('Enter a valid amount')
       return
     }
@@ -202,16 +283,40 @@ function SendForm({
       setLocalError(`Insufficient balance. You have ${balanceDisplay} USDC.`)
       return
     }
-    if (!/^\d+(\.\d{1,6})?$/.test(amount)) {
-      setLocalError('Too many decimal places (max 6)')
-      return
-    }
     setStage('preview')
   }
 
   function handleSend() {
+    // M4: guard against double-submit.
+    if (isPending || isConfirming) return
     setLocalError('')
-    void send(recipient as `0x${string}`, amount)
+    const trimmed = amount.trim()
+    if (!trimmed || !AMOUNT_REGEX.test(trimmed)) {
+      setLocalError('Enter a valid amount (max 6 decimals)')
+      return
+    }
+    const blocked = isBlockedRecipient(recipient, myAddress)
+    if (blocked) {
+      setLocalError(blocked)
+      return
+    }
+    if (isWrongChain) {
+      setLocalError('Please switch to Arc Testnet first — your details are preserved.')
+      toast.error('Switch to Arc Testnet first, then confirm again.')
+      return
+    }
+    sendSnapshotRef.current = { recipient, amount: trimmed, note, fromAddress: myAddress }
+    try {
+      void send(recipient as `0x${string}`, trimmed)
+    } catch (e) {
+      setLocalError(parseOnchainError(e))
+    }
+  }
+
+  function handleSwitchChain() {
+    // M3: explicit switch that preserves form state (no send, no reset).
+    toast.message('Switching to Arc Testnet — your payment details are kept.')
+    switchToArc()
   }
 
   function handleReset() {
@@ -219,6 +324,9 @@ function SendForm({
     setAmount('')
     setNote('')
     setLocalError('')
+    setReceiptFailed(false)
+    pendingRecordedRef.current.clear()
+    sendSnapshotRef.current = null
     setStage('form')
     reset()
   }
@@ -253,7 +361,11 @@ function SendForm({
 
   if (stage === 'preview') {
     const isProcessing = isPending || isConfirming
-    const errMsg = isError ? parseOnchainError(error) : ''
+    const baseErr = isError ? parseOnchainError(error) : ''
+    const receiptErr = receiptFailed || receipt?.status === 'reverted'
+      ? 'Transaction failed onchain (reverted). Your payment was not sent.'
+      : ''
+    const errMsg = localError || receiptErr || baseErr
 
     return (
       <motion.div
@@ -296,6 +408,13 @@ function SendForm({
               <span className="text-sm">{errMsg}</span>
             </div>
           )}
+          {localError === '' && isWrongChain && (
+            <div className="flex items-start gap-2 p-3 rounded-xl"
+              style={{ background: 'var(--danger-bg)', color: 'var(--danger)' }}>
+              <AlertCircle size={16} className="flex-shrink-0 mt-0.5" />
+              <span className="text-sm">Wrong network — switch to Arc Testnet first. Your recipient and amount are preserved.</span>
+            </div>
+          )}
         </div>
         <div className="p-4 pt-0">
           {isProcessing ? (
@@ -303,11 +422,11 @@ function SendForm({
               <TxSpinner text={isPending ? 'Confirm in wallet...' : 'Confirming on chain...'} />
             </div>
           ) : isWrongChain ? (
-            <Button className="w-full" onClick={() => { void send(recipient as `0x${string}`, amount) }}>
-              Switch & Send
+            <Button className="w-full" onClick={handleSwitchChain} loading={isSwitching}>
+              Switch to Arc Testnet
             </Button>
           ) : (
-            <Button className="w-full" onClick={handleSend}>
+            <Button className="w-full" onClick={handleSend} disabled={isPending || isConfirming}>
               Confirm & Send
             </Button>
           )}
@@ -369,8 +488,9 @@ function SendForm({
             <div className="absolute right-3 top-1/2 -translate-y-1/2 flex items-center gap-2">
               <button
                 onClick={() => {
-                  const max = (Number(balance) / 1_000_000).toFixed(6).replace(/\.?0+$/, '')
+                  const max = formatMaxWithReserve(balance)
                   setAmount(max)
+                  setLocalError('')
                 }}
                 className="text-xs font-semibold px-2 py-1 rounded-lg transition-colors hover:opacity-80"
                 style={{ background: 'var(--accent)', color: '#fff' }}>
@@ -379,6 +499,9 @@ function SendForm({
               <span className="text-sm font-medium" style={{ color: 'var(--muted)' }}>USDC</span>
             </div>
           </div>
+          <p className="text-xs mt-1.5" style={{ color: 'var(--subtle)' }}>
+            MAX leaves 0.1 USDC reserved for gas.
+          </p>
           {/* Quick amounts */}
           <div className="flex gap-2 mt-2">
             {['1', '5', '10', '25'].map((v) => (
@@ -429,21 +552,32 @@ function SendForm({
 
 // ── Receive Card ────────────────────────────────────────────────────────────
 
+export function buildPayRequestUrl(address: string): string {
+  const base = typeof window !== 'undefined' ? window.location.origin : ''
+  return `${base}?pay=${address}`
+}
+
 function ReceiveCard({ address }: { address: string }) {
   const [copied, setCopied] = useState(false)
   const [linkCopied, setLinkCopied] = useState(false)
-  const payLink = `${window.location.origin}?pay=${address}`
+  const payLink = buildPayRequestUrl(address)
 
   function copy() {
-    void navigator.clipboard.writeText(address)
-    setCopied(true)
-    setTimeout(() => setCopied(false), 1500)
+    void copyText(address, 'Address copied').then((ok) => {
+      if (ok) {
+        setCopied(true)
+        setTimeout(() => setCopied(false), 1500)
+      }
+    })
   }
 
   function copyLink() {
-    void navigator.clipboard.writeText(payLink)
-    setLinkCopied(true)
-    setTimeout(() => setLinkCopied(false), 1500)
+    void copyText(payLink, 'Payment link copied').then((ok) => {
+      if (ok) {
+        setLinkCopied(true)
+        setTimeout(() => setLinkCopied(false), 1500)
+      }
+    })
   }
 
   return (

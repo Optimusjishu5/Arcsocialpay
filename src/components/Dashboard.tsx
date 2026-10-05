@@ -4,14 +4,16 @@ import { ArrowUpRight, ArrowDownLeft, History, MessageCircle, TrendingUp, Copy, 
 import { ConnectKitButton } from 'connectkit'
 import { TokenUSDC } from '@web3icons/react'
 import { useArcAccount, useUsdcBalance, ARC_CHAIN_ID } from '../hooks/useArcWallet'
-import { useAppStore } from '../store/appStore'
+import { useAppStore, filterTxHistoryForAddress, filterConversationsForAddress, isSameAddress } from '../store/appStore'
+import { useTxReconciliationOnLoad, useUsdcTransferWatcher, useBackfillMissingTxRecords } from '../hooks/useTxHistory'
 import { Avatar } from './ui/Avatar'
 import { Button } from './ui/Button'
 import { TxStatusBadge } from './ui/TxStatusBadge'
 import { NetworkBadge } from './ui/NetworkBadge'
 import { formatAddress, formatTimestamp } from '../utils/format'
+import { copyText } from '../utils/copy'
 import { buildTxExplorerUrl } from '@/onchain-facts'
-import type { NavView } from '../types'
+import type { NavView } from '../types/index'
 
 interface Props {
   onNavigate: (view: NavView, extra?: Record<string, string>) => void
@@ -23,18 +25,29 @@ export function Dashboard({ onNavigate }: Props) {
   const { txHistory, conversations, posts } = useAppStore()
   const [copied, setCopied] = useState(false)
 
-  const myTxs = txHistory.filter((t) =>
-    t.fromAddress === address || t.toAddress === address
-  ).slice(0, 5)
+  // DATA/INDEXING: reconcile pending txHistory on app load (best-effort,
+  // non-blocking) + refresh balance immediately on USDC Transfer.
+  // Balance polling single source stays `useUsdcBalance` (10s fallback).
+  useTxReconciliationOnLoad()
+  useBackfillMissingTxRecords()
+  useUsdcTransferWatcher(address, () => {
+    void refetch()
+  })
 
-  const recentConvs = conversations.slice(0, 3)
+  // Scope to current address, case-insensitive (EVM addresses).
+  const myTxs = filterTxHistoryForAddress(txHistory, address).slice(0, 5)
+
+  const recentConvs = filterConversationsForAddress(conversations, address).slice(0, 3)
   const recentPosts = posts.slice(0, 3)
 
   function copyAddress() {
     if (!address) return
-    void navigator.clipboard.writeText(address)
-    setCopied(true)
-    setTimeout(() => setCopied(false), 1500)
+    void copyText(address, 'Address copied').then((ok) => {
+      if (ok) {
+        setCopied(true)
+        setTimeout(() => setCopied(false), 1500)
+      }
+    })
   }
 
   if (!isConnected) {
@@ -195,7 +208,7 @@ export function Dashboard({ onNavigate }: Props) {
           <p className="text-sm py-4 text-center" style={{ color: 'var(--muted)' }}>No conversations yet</p>
         ) : (
           recentConvs.map((conv) => {
-            const other = conv.participants.find((p) => p !== address) ?? conv.participants[0]
+            const other = conv.participants.find((p) => !isSameAddress(p, address)) ?? conv.participants[0]
             return (
               <button
                 key={conv.id}
@@ -276,9 +289,10 @@ function Section({ title, action, children }: { title: string; action?: React.Re
   )
 }
 
-function TxRow({ tx, myAddress }: { tx: import('../types').TxRecord; myAddress: string }) {
-  const isSent = tx.fromAddress === myAddress
+function TxRow({ tx, myAddress }: { tx: import('../types/index').TxRecord; myAddress: string }) {
+  const isSent = isSameAddress(tx.fromAddress, myAddress)
   const other = isSent ? tx.toAddress : tx.fromAddress
+  // Chain/explorer single source: ARC_CHAIN_ID + builder (no hardcoded URLs).
   const explorerUrl = buildTxExplorerUrl(ARC_CHAIN_ID, tx.txHash)
 
   return (

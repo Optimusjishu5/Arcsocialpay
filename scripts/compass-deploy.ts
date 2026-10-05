@@ -75,7 +75,7 @@ function explorerUrlFor(address: string): string {
   return ACTIVE_CHAIN.explorer ? `${ACTIVE_CHAIN.explorer}/address/${address}` : address;
 }
 
-const WORK_DIR = '/home/user/app';
+const WORK_DIR = process.cwd();
 const CONTRACTS_ROOT_DIR = `${WORK_DIR}/contracts`;
 const CONTRACT_SOURCES_DIR = CONTRACTS_ROOT_DIR;
 const FOUNDRY_OUT_DIR = `${CONTRACTS_ROOT_DIR}/out`;

@@ -1,3 +1,6 @@
+// DEPRECATED (P0 dual-store): legacy view using src/store.ts + src/types.ts.
+// Not routed by src/App.tsx (Pay flow lives in PayView + src/store/appStore.ts).
+// Kept so `tsc --noEmit` still passes; do not add new features here.
 import { useState } from 'react'
 import {
   ArrowUpRight, ArrowDownLeft, Copy, ExternalLink,
@@ -15,8 +18,11 @@ import {
 import { parseAmount, Amount, usdcDecimalsFor } from '../onchain-money'
 import { shortAddress } from '../store'
 import TopBar from './TopBar'
+import { ARC_CHAIN_ID } from '../hooks/useArcWallet'
+import { ZERO_ADDRESS, AMOUNT_REGEX, maxSendableRaw, formatUsdcDisplay } from '../utils/format'
+import { copyText } from '../utils/copy'
 
-const CHAIN_ID = 5042002 // Arc Testnet
+const CHAIN_ID = ARC_CHAIN_ID
 
 export default function WalletView() {
   const { address, isConnected, chainId } = useAccount()
@@ -44,8 +50,7 @@ export default function WalletView() {
 
   const copyAddress = () => {
     if (!address) return
-    navigator.clipboard.writeText(address).catch(() => {})
-    toast.success('Address copied', { duration: 2000 })
+    void copyText(address, 'Address copied')
   }
 
   if (!isConnected || !address) {
@@ -293,14 +298,25 @@ function SendModal({
 }) {
   const [recipient, setRecipient] = useState('')
   const [amount, setAmount] = useState('')
+  const [localError, setLocalError] = useState('')
   const { chainId } = useAccount()
   const { switchChain } = useSwitchChain()
 
   const usdcFact = getUsdc(CHAIN_ID)
+  const usdcAddress = (usdcFact?.address ?? '') as string
   const isWrongChain = chainId !== CHAIN_ID
-  const recipientValid = recipient.trim() !== '' && isAddress(recipient.trim())
-  const amountNum = parseFloat(amount)
-  const amountValid = !isNaN(amountNum) && amountNum > 0 && amountNum <= parseFloat(balance)
+  const trimmedRecipient = recipient.trim()
+  const recipientIsAddress = trimmedRecipient !== '' && isAddress(trimmedRecipient)
+  const lowerRecipient = trimmedRecipient.toLowerCase()
+  const isBlockedRecipient =
+    recipientIsAddress &&
+    (lowerRecipient === ZERO_ADDRESS.toLowerCase() ||
+      lowerRecipient === usdcAddress.toLowerCase() ||
+      lowerRecipient === address.toLowerCase())
+  const recipientValid = recipientIsAddress && !isBlockedRecipient
+  const amountNum = parseFloat(amount.trim())
+  const amountFormatValid = AMOUNT_REGEX.test(amount.trim())
+  const amountValid = amountFormatValid && !isNaN(amountNum) && amountNum > 0 && amountNum <= parseFloat(balance)
 
   const {
     writeContract,
@@ -310,22 +326,84 @@ function SendModal({
     reset,
   } = useWriteContract()
 
-  const { isLoading: isConfirming, isSuccess } = useWaitForTransactionReceipt({ hash })
+  // H1: only treat receipt.status === 'success' as confirmed.
+  const { data: receipt, isLoading: isConfirming, isSuccess: isReceiptSuccess, isError: isReceiptError } =
+    useWaitForTransactionReceipt({ hash })
+  const isConfirmed = isReceiptSuccess && receipt?.status === 'success'
+  const isFailed = isReceiptError || receipt?.status === 'reverted'
+
+  function getBlockedReason(): string | null {
+    if (!recipientIsAddress) return null
+    if (lowerRecipient === ZERO_ADDRESS.toLowerCase()) return 'Cannot send to the zero address (0x000...000)'
+    if (lowerRecipient === usdcAddress.toLowerCase()) return 'Cannot send to the USDC contract address'
+    if (lowerRecipient === address.toLowerCase()) return 'Cannot send to your own address'
+    return null
+  }
+
+  function handleMax() {
+    // H2: leave 0.1 USDC for gas — never set the full balance.
+    // Exact bigint path (no Number/parseFloat) via maxSendableRaw.
+    // formatUsdcDisplay is grouped DISPLAY-ONLY, so strip commas for <input>.
+    try {
+      const balRaw = parseAmount(CHAIN_ID, (balance || '0').replace(/,/g, '').trim() || '0').raw
+      const maxRaw = maxSendableRaw(balRaw, 100_000n)
+      if (maxRaw <= 0n) {
+        setAmount('0')
+      } else {
+        const ungrouped = formatUsdcDisplay(maxRaw).replace(/,/g, '')
+        const trimmed = ungrouped.includes('.') ? ungrouped.replace(/\.?0+$/, '') : ungrouped
+        setAmount(trimmed === '' ? '0' : trimmed)
+      }
+    } catch {
+      setAmount('0')
+    }
+    setLocalError('')
+  }
 
   const handleSend = () => {
-    if (isWrongChain) { switchChain({ chainId: CHAIN_ID }); return }
-    if (!usdcFact || !recipientValid || !amountValid) return
+    // M4: block double-submit.
+    if (isPending || isConfirming) return
+    setLocalError('')
+    // M3: explicit switch first — preserve recipient/amount, don't silently drop.
+    if (isWrongChain) {
+      toast.message('Switching to Arc Testnet — your details are preserved.')
+      switchChain({ chainId: CHAIN_ID })
+      return
+    }
+    const blocked = getBlockedReason()
+    if (!recipientIsAddress) { setLocalError('Enter a valid recipient address (0x...)'); return }
+    if (blocked) { setLocalError(blocked); return }
+    if (!amount.trim() || !amountFormatValid) {
+      setLocalError(
+        !amount.trim() || isNaN(amountNum) || amountNum <= 0
+          ? 'Enter a valid amount'
+          : 'Too many decimal places (max 6)',
+      )
+      return
+    }
+    if (!usdcFact || !recipientValid || !amountValid) {
+      if (!amountValid && amountNum > parseFloat(balance)) {
+        setLocalError(`Insufficient balance. You have ${balance} USDC.`)
+      }
+      return
+    }
     try {
-      const parsed = parseAmount(CHAIN_ID, amount)
+      const parsed = parseAmount(CHAIN_ID, amount.trim())
       writeContract({
         address: usdcFact.address as `0x${string}`,
         abi: erc20Abi,
         functionName: 'transfer',
-        args: [recipient.trim() as `0x${string}`, parsed.raw],
+        args: [trimmedRecipient as `0x${string}`, parsed.raw],
         chainId: CHAIN_ID,
       })
-    } catch (_e) {
-      // invalid amount
+    } catch (e) {
+      // H3: surface parseAmount throws instead of swallowing.
+      const msg = e instanceof Error ? e.message : ''
+      if (msg.includes('fraction') || msg.includes('TOO_MANY')) {
+        setLocalError('Too many decimal places (max 6)')
+      } else {
+        setLocalError('Invalid amount (max 6 decimals)')
+      }
     }
   }
 
@@ -346,7 +424,7 @@ function SendModal({
         <h3 className="display font-bold text-lg mb-1" style={{ color: 'var(--ink)' }}>Send USDC</h3>
         <p className="text-sm mb-5" style={{ color: 'var(--subtle)' }}>Arc Testnet · Balance: ${balance}</p>
 
-        {isSuccess ? (
+        {isConfirmed ? (
           <div className="text-center py-4">
             <CheckCircle2 size={40} className="mx-auto mb-3" style={{ color: 'var(--success)' }} />
             <p className="font-semibold" style={{ color: 'var(--success)' }}>Sent successfully!</p>
@@ -362,18 +440,52 @@ function SendModal({
               </a>
             )}
             <button
-              onClick={() => { onSuccess(); onClose() }}
+              onClick={() => { onSuccess(); onClose(); reset() }}
               className="mt-4 w-full py-2 rounded-xl text-sm font-semibold"
               style={{ background: 'var(--surface-muted)', color: 'var(--ink)' }}
             >
               Done
             </button>
           </div>
+        ) : isFailed ? (
+          <div className="text-center py-4">
+            <p className="font-semibold mb-1" style={{ color: 'var(--danger)' }}>Transaction failed</p>
+            <p className="text-xs mb-3" style={{ color: 'var(--muted)' }}>
+              The transaction reverted onchain. Your funds were not sent.
+            </p>
+            {hash && (
+              <a
+                href={buildTxExplorerUrl(CHAIN_ID, hash)}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-1 mt-1 mb-3 text-xs"
+                style={{ color: 'var(--accent)' }}
+              >
+                View on Arc Explorer <ExternalLink size={12} />
+              </a>
+            )}
+            <div className="flex gap-2 mt-2">
+              <button
+                onClick={() => { reset(); setLocalError('') }}
+                className="flex-1 py-2 rounded-xl text-sm font-semibold"
+                style={{ background: 'var(--surface-muted)', color: 'var(--ink)' }}
+              >
+                Try Again
+              </button>
+              <button
+                onClick={onClose}
+                className="flex-1 py-2 rounded-xl text-sm font-semibold border"
+                style={{ borderColor: 'var(--border)', color: 'var(--muted)' }}
+              >
+                Close
+              </button>
+            </div>
+          </div>
         ) : (
           <>
             {isWrongChain && (
               <div className="mb-4 p-3 rounded-xl text-sm" style={{ background: 'rgba(186,43,76,0.1)', color: 'var(--danger)' }}>
-                Wrong network. Click Send to switch to Arc Testnet.
+                Wrong network. Switch to Arc Testnet first — your recipient and amount are preserved.
               </div>
             )}
             <div className="space-y-3 mb-4">
@@ -382,19 +494,21 @@ function SendModal({
                 <input
                   type="text"
                   value={recipient}
-                  onChange={e => setRecipient(e.target.value)}
+                  onChange={e => { setRecipient(e.target.value); setLocalError('') }}
                   placeholder="0x…"
                   className="w-full px-3 py-2.5 rounded-xl border text-sm mono outline-none"
                   style={{ background: 'var(--surface-muted)', borderColor: recipientValid || !recipient ? 'var(--border)' : 'var(--danger)', color: 'var(--ink)' }}
                 />
                 {recipient && !recipientValid && (
-                  <p className="text-xs mt-1" style={{ color: 'var(--danger)' }}>Invalid address</p>
+                  <p className="text-xs mt-1" style={{ color: 'var(--danger)' }}>
+                    {getBlockedReason() ?? 'Invalid address'}
+                  </p>
                 )}
               </div>
               <div>
                 <div className="flex justify-between text-xs mb-1.5" style={{ color: 'var(--muted)' }}>
                   <span>Amount (USDC)</span>
-                  <button onClick={() => setAmount(balance)} className="font-semibold" style={{ color: 'var(--accent)' }}>
+                  <button onClick={handleMax} className="font-semibold" style={{ color: 'var(--accent)' }}>
                     Max
                   </button>
                 </div>
@@ -407,13 +521,16 @@ function SendModal({
                     min="0"
                     step="0.01"
                     value={amount}
-                    onChange={e => setAmount(e.target.value)}
+                    onChange={e => { setAmount(e.target.value); setLocalError('') }}
                     placeholder="0.00"
                     className="flex-1 bg-transparent text-base font-semibold tabular outline-none"
                     style={{ color: 'var(--ink)' }}
                   />
                   <span className="text-sm font-medium" style={{ color: 'var(--muted)' }}>USDC</span>
                 </div>
+                <p className="text-xs mt-1" style={{ color: 'var(--subtle)' }}>
+                  MAX leaves 0.1 USDC reserved for gas.
+                </p>
                 <div className="flex gap-2 mt-2">
                   {['10', '50', '100'].map(v => (
                     <button
@@ -433,9 +550,9 @@ function SendModal({
               </div>
             </div>
 
-            {writeError && (
+            {(writeError || localError) && (
               <p className="text-xs mb-3 px-3 py-2 rounded-lg" style={{ background: 'rgba(186,43,76,0.1)', color: 'var(--danger)' }}>
-                {writeError.message.includes('user rejected') ? 'Transaction cancelled.' : 'Transaction failed. Please try again.'}
+                {localError || (writeError!.message.includes('user rejected') ? 'Transaction cancelled.' : 'Transaction failed. Please try again.')}
               </p>
             )}
 
@@ -468,9 +585,12 @@ function ReceiveModal({ address, onClose }: { address: string; onClose: () => vo
   const [copied, setCopied] = useState(false)
 
   const copyAddr = () => {
-    navigator.clipboard.writeText(address).catch(() => {})
-    setCopied(true)
-    setTimeout(() => setCopied(false), 2000)
+    void copyText(address, 'Address copied').then((ok) => {
+      if (ok) {
+        setCopied(true)
+        setTimeout(() => setCopied(false), 2000)
+      }
+    })
   }
 
   return (

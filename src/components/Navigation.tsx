@@ -8,7 +8,7 @@ import { useArcAccount } from '../hooks/useArcWallet'
 import { useTheme, useAppStore } from '../store/appStore'
 import { Avatar } from './ui/Avatar'
 import { NetworkBadge } from './ui/NetworkBadge'
-import type { NavView } from '../types'
+import type { NavView } from '../types/index'
 
 interface Props {
   current: NavView
@@ -136,8 +136,8 @@ export function MobileNav({ current, onNavigate }: Props) {
   const { notifications } = useAppStore()
   const unread = notifications.filter((n) => !n.read).length
 
-  // Show only 5 items on mobile (omit groups/channels to keep it clean)
-  const mobileItems = NAV_ITEMS.filter((n) => n.id !== 'explore' ? true : true).slice(0, 5)
+  // Show 5 items on mobile — drop Explore (still reachable via desktop/gestures), keep Profile.
+  const mobileItems = NAV_ITEMS.filter((n) => n.id !== 'explore')
 
   return (
     <nav className="md:hidden fixed bottom-0 left-0 right-0 z-40 safe-bottom"

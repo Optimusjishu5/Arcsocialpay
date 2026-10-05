@@ -86,6 +86,7 @@ export interface Group {
   ownerAddress: string
   adminAddresses: string[]
   memberAddresses: string[]
+  invitedAddresses?: string[]
   createdAt: number
   avatarSeed: string
   messageCount: number

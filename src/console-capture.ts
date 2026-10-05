@@ -33,19 +33,31 @@ const RATE_LIMIT_WINDOW_MS = 1_000;
 const MAX_PER_WINDOW = 100;
 const MAX_REPEAT_BEFORE_FLUSH = 500;
 
+// Only capture in dev preview — production builds preserve console behaviour
+// but never postMessage anything out.
+const IS_DEV: boolean = (() => {
+  try {
+    return import.meta.env.DEV === true;
+  } catch {
+    return false;
+  }
+})();
+
 // Lines emitted by our own tracing instrumentation are noise for the agent.
 const NOISE_PREFIXES = ['[studio-trace]'];
 
 const LEVELS: ConsoleLevel[] = ['log', 'info', 'warn', 'error', 'debug'];
 
 // ---------------------------------------------------------------------------
-// Parent origin resolution (mirrors tracing.ts)
+// Parent origin resolution (mirrors tracing.ts — never use '*' wildcard)
 // ---------------------------------------------------------------------------
 
-const _parentOrigin: string = (() => {
+const _parentOrigin: string | null = (() => {
   try {
     if (window.location.ancestorOrigins?.length) {
-      return window.location.ancestorOrigins[0];
+      const origin = window.location.ancestorOrigins[0];
+      if (origin.startsWith('http://') || origin.startsWith('https://')) return origin;
+      return null;
     }
   } catch {
     /* sandboxed iframe may throw */
@@ -59,7 +71,7 @@ const _parentOrigin: string = (() => {
     /* malformed referrer */
   }
 
-  return '*';
+  return null;
 })();
 
 // ---------------------------------------------------------------------------
@@ -135,6 +147,7 @@ let _windowCount = 0;
 let _dropped = 0;
 
 function send(entry: ConsoleLogEntry): void {
+  if (!IS_DEV || !_parentOrigin) return;
   try {
     window.parent.postMessage({ type: MESSAGE_TYPE, entry }, _parentOrigin);
   } catch {
@@ -213,6 +226,7 @@ for (const level of LEVELS) {
 
   console[level] = (...args: unknown[]): void => {
     original(...args);
+    if (!IS_DEV) return;
 
     try {
       const message = truncate(args.map(formatArg).join(' '));
@@ -231,6 +245,7 @@ for (const level of LEVELS) {
 // ---------------------------------------------------------------------------
 
 window.addEventListener('error', (e: ErrorEvent) => {
+  if (!IS_DEV) return;
   try {
     flushRepeat();
     const source = e.filename ? `${e.filename}:${e.lineno ?? 0}:${e.colno ?? 0}` : undefined;
@@ -247,6 +262,7 @@ window.addEventListener('error', (e: ErrorEvent) => {
 });
 
 window.addEventListener('unhandledrejection', (e: PromiseRejectionEvent) => {
+  if (!IS_DEV) return;
   try {
     flushRepeat();
     const reason: unknown = e.reason;

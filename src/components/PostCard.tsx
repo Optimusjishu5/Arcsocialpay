@@ -1,3 +1,7 @@
+// DEPRECATED (P0 dual-store): legacy view using src/store.ts + src/types.ts.
+// Not routed by src/App.tsx (which uses Dashboard/MessagesView/PayView/SocialFeed
+// + src/store/appStore.ts + src/types/index.ts). Kept so `tsc --noEmit` still
+// passes; do not add new features here. For tips/sends use PayView/MessagesView.
 import { useState } from 'react'
 import {
   Heart, MessageCircle, Repeat2, Share2, Bookmark,
@@ -7,7 +11,12 @@ import {
 import { motion, AnimatePresence } from 'framer-motion'
 import { useStore, actions, formatTime, formatCount } from '../store'
 import type { Post } from '../types'
-import { buildTxExplorerUrl } from '../onchain-facts'
+import { buildTxExplorerUrl, getUsdc } from '../onchain-facts'
+import { useReadContract, useWriteContract, useWaitForTransactionReceipt, useSwitchChain, useAccount } from 'wagmi'
+import { erc20Abi, isAddress } from 'viem'
+import { parseAmount, Amount, usdcDecimalsFor } from '../onchain-money'
+import { ARC_CHAIN_ID } from '../hooks/useArcWallet'
+import { ZERO_ADDRESS, AMOUNT_REGEX } from '../utils/format'
 
 interface PostCardProps {
   postId: string
@@ -114,7 +123,12 @@ export default function PostCard({ postId, compact, hideReplies }: PostCardProps
     }
   }
   const handleShare = () => {
-    navigator.clipboard.writeText(`https://arcsocial.app/post/${postId}`).catch(() => {})
+    const shareUrl = buildPostShareUrl(postId)
+    try {
+      void navigator.clipboard.writeText(shareUrl).catch(() => {})
+    } catch {
+      // clipboard unavailable — still show confirmation
+    }
     setShareToast(true)
     setTimeout(() => setShareToast(false), 2000)
   }
@@ -357,31 +371,33 @@ function ActionBtn({
   )
 }
 
-import { useReadContract, useWriteContract, useWaitForTransactionReceipt } from 'wagmi'
-import { erc20Abi } from 'viem'
-import { getUsdc } from '../onchain-facts'
-import { parseAmount, formatAmount, Amount, usdcDecimalsFor } from '../onchain-money'
-import { useAccount } from 'wagmi'
+function buildPostShareUrl(postId: string): string {
+  const base = typeof window !== 'undefined' ? window.location.origin : ''
+  return `${base}/post/${postId}`
+}
 
-const ARC_TESTNET_CHAIN_ID = 5042002
+export { buildPostShareUrl }
 
 function TipModal({ postId, authorId, onClose }: { postId: string; authorId: string; onClose: () => void }) {
   const [amount, setAmount] = useState('1')
+  const [localError, setLocalError] = useState('')
   const { address, chainId } = useAccount()
+  const { switchChain, isPending: isSwitching } = useSwitchChain()
   const author = useStore(s => s.users[authorId])
-  const usdcFact = getUsdc(ARC_TESTNET_CHAIN_ID)
+  const usdcFact = getUsdc(ARC_CHAIN_ID)
+  const isWrongChain = chainId !== undefined && chainId !== ARC_CHAIN_ID
 
   const { data: balanceRaw } = useReadContract({
     address: usdcFact?.address as `0x${string}`,
     abi: erc20Abi,
     functionName: 'balanceOf',
     args: address ? [address] : undefined,
-    chainId: ARC_TESTNET_CHAIN_ID,
+    chainId: ARC_CHAIN_ID,
     query: { enabled: !!address && !!usdcFact },
   })
 
   const balance = balanceRaw
-    ? Amount.fromRaw(balanceRaw, usdcDecimalsFor(ARC_TESTNET_CHAIN_ID)).toFixed(2)
+    ? Amount.fromRaw(balanceRaw, usdcDecimalsFor(ARC_CHAIN_ID)).toFixed(2)
     : '0.00'
 
   const {
@@ -391,23 +407,56 @@ function TipModal({ postId, authorId, onClose }: { postId: string; authorId: str
     error: writeError,
   } = useWriteContract()
 
-  const { isLoading: isConfirming, isSuccess } = useWaitForTransactionReceipt({ hash })
+  // H1: gate success on receipt.status === 'success', not on fetch success.
+  const { data: receipt, isLoading: isConfirming, isSuccess: isReceiptSuccess, isError: isReceiptError } =
+    useWaitForTransactionReceipt({ hash })
+  const isConfirmed = isReceiptSuccess && receipt?.status === 'success'
+  const isFailed = isReceiptError || receipt?.status === 'reverted'
 
   const recipientAddress = author?.address
 
+  function getRecipientError(): string | null {
+    if (!recipientAddress || !isAddress(recipientAddress)) return 'This user has not connected a valid wallet.'
+    const lower = recipientAddress.toLowerCase()
+    if (lower === ZERO_ADDRESS.toLowerCase()) return 'Cannot tip the zero address'
+    if (usdcFact && lower === usdcFact.address.toLowerCase()) return 'Cannot tip the USDC contract address'
+    if (address && lower === address.toLowerCase()) return 'Cannot tip yourself'
+    return null
+  }
+
   const handleTip = () => {
+    // M4: block double-submit.
+    if (isPending || isConfirming) return
+    setLocalError('')
     if (!recipientAddress || !usdcFact || !address) return
+    // M3: require explicit switch first; preserve amount state.
+    if (isWrongChain) {
+      switchChain({ chainId: ARC_CHAIN_ID })
+      return
+    }
+    const recipientErr = getRecipientError()
+    if (recipientErr) { setLocalError(recipientErr); return }
+    // H3: strict amount format (covers empty, negative, dust, >6 decimals).
+    const trimmed = amount.trim()
+    if (!trimmed || !AMOUNT_REGEX.test(trimmed)) {
+      if (!trimmed || isNaN(parseFloat(trimmed)) || parseFloat(trimmed) <= 0) {
+        setLocalError('Enter a valid amount')
+      } else {
+        setLocalError('Too many decimal places (max 6)')
+      }
+      return
+    }
     try {
-      const parsed = parseAmount(ARC_TESTNET_CHAIN_ID, amount)
+      const parsed = parseAmount(ARC_CHAIN_ID, trimmed)
       writeContract({
         address: usdcFact.address as `0x${string}`,
         abi: erc20Abi,
         functionName: 'transfer',
         args: [recipientAddress as `0x${string}`, parsed.raw],
-        chainId: ARC_TESTNET_CHAIN_ID,
+        chainId: ARC_CHAIN_ID,
       })
-    } catch (_e) {
-      // invalid amount
+    } catch (e) {
+      setLocalError(e instanceof Error && e.message.includes('fraction') ? 'Too many decimal places (max 6)' : 'Invalid amount (max 6 decimals)')
     }
   }
 
@@ -440,13 +489,13 @@ function TipModal({ postId, authorId, onClose }: { postId: string; authorId: str
           <p className="text-sm text-center py-4" style={{ color: 'var(--subtle)' }}>
             This user has not connected a wallet.
           </p>
-        ) : isSuccess ? (
+        ) : isConfirmed ? (
           <div className="text-center py-4">
             <CheckCircle2 size={36} className="mx-auto mb-2" style={{ color: 'var(--success)' }} />
             <p className="font-semibold text-sm" style={{ color: 'var(--success)' }}>Tip sent successfully!</p>
             {hash && (
               <a
-                href={buildTxExplorerUrl(ARC_TESTNET_CHAIN_ID, hash)}
+                href={buildTxExplorerUrl(ARC_CHAIN_ID, hash)}
                 target="_blank"
                 rel="noopener noreferrer"
                 className="inline-flex items-center gap-1 mt-2 text-xs"
@@ -466,6 +515,16 @@ function TipModal({ postId, authorId, onClose }: { postId: string; authorId: str
         ) : (
           <>
             <div className="mb-4">
+              {isWrongChain && (
+                <div className="mb-3 p-3 rounded-xl text-xs" style={{ background: 'rgba(186,43,76,0.1)', color: 'var(--danger)' }}>
+                  Wrong network. You need to switch to Arc Testnet first — your tip amount is preserved.
+                </div>
+              )}
+              {isFailed && (
+                <div className="mb-3 p-3 rounded-xl text-xs" style={{ background: 'rgba(186,43,76,0.1)', color: 'var(--danger)' }}>
+                  Transaction failed onchain (reverted). Your funds were not sent.
+                </div>
+              )}
               <div className="flex justify-between text-xs mb-1.5" style={{ color: 'var(--subtle)' }}>
                 <span>Amount (USDC)</span>
                 <span className="tabular">Balance: {balance} USDC</span>
@@ -476,7 +535,7 @@ function TipModal({ postId, authorId, onClose }: { postId: string; authorId: str
                   min="0.01"
                   step="0.01"
                   value={amount}
-                  onChange={e => setAmount(e.target.value)}
+                  onChange={e => { setAmount(e.target.value); setLocalError('') }}
                   className="flex-1 bg-transparent text-base font-semibold tabular outline-none"
                   style={{ color: 'var(--ink)' }}
                 />
@@ -486,7 +545,7 @@ function TipModal({ postId, authorId, onClose }: { postId: string; authorId: str
                 {['1', '5', '10'].map(v => (
                   <button
                     key={v}
-                    onClick={() => setAmount(v)}
+                    onClick={() => { setAmount(v); setLocalError('') }}
                     className="flex-1 py-1.5 rounded-lg text-xs font-semibold border transition-all"
                     style={{
                       borderColor: amount === v ? 'var(--accent)' : 'var(--border)',
@@ -500,9 +559,9 @@ function TipModal({ postId, authorId, onClose }: { postId: string; authorId: str
               </div>
             </div>
 
-            {writeError && (
+            {(writeError || localError) && (
               <p className="text-xs mb-3 px-3 py-2 rounded-lg" style={{ background: 'rgba(186,43,76,0.1)', color: 'var(--danger)' }}>
-                {writeError.message.includes('user rejected') ? 'Transaction cancelled.' : 'Transaction failed. Please try again.'}
+                {localError || (writeError!.message.includes('user rejected') ? 'Transaction cancelled.' : 'Transaction failed. Please try again.')}
               </p>
             )}
 
@@ -516,11 +575,11 @@ function TipModal({ postId, authorId, onClose }: { postId: string; authorId: str
               </button>
               <button
                 onClick={handleTip}
-                disabled={isPending || isConfirming || !amount || parseFloat(amount) <= 0}
+                disabled={isPending || isConfirming || isSwitching || !amount.trim() || parseFloat(amount) <= 0}
                 className="flex-1 py-2.5 rounded-xl text-sm font-semibold transition-all disabled:opacity-50"
                 style={{ background: 'var(--accent)', color: 'var(--bg)' }}
               >
-                {isPending ? 'Confirm in wallet…' : isConfirming ? 'Confirming…' : `Tip $${amount}`}
+                {isWrongChain ? 'Switch Network' : isPending ? 'Confirm in wallet…' : isConfirming ? 'Confirming…' : `Tip $${amount}`}
               </button>
             </div>
           </>

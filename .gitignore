@@ -1,0 +1,21 @@
+# Env files (never commit real secrets; .env.example is the template)
+.env*
+!.env.example
+
+# Deps
+node_modules/
+
+# Vite build output
+dist/
+
+# Foundry build artifacts
+contracts/out/
+contracts/cache/
+
+# Hardhat build artifacts (see hardhat.config.ts paths)
+artifacts/
+cache_hardhat/
+
+# Compass fork-verify receipts
+.compass-verify/
+contracts/.compass-verify/

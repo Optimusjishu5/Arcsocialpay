@@ -67,7 +67,18 @@ type TraceEvent = RpcTraceEvent | HttpTraceEvent | GroupStartTraceEvent | GroupE
 
 const LOG = '[studio-trace]';
 
+// Only trace in dev preview. In production builds this module is a no-op
+// (emit drops events, fetch/provider patches pass through untouched).
+const IS_DEV: boolean = (() => {
+  try {
+    return import.meta.env.DEV === true;
+  } catch {
+    return false;
+  }
+})();
+
 function log(...args: unknown[]): void {
+  if (!IS_DEV) return;
   console.log(LOG, ...args);
 }
 
@@ -145,13 +156,17 @@ function emitWithGroups(event: RpcTraceEvent | HttpTraceEvent): void {
 
 /**
  * Resolve the parent frame's origin for targeted postMessage.
- * Falls back to '*' only if the origin cannot be determined.
+ * Returns null when the origin cannot be determined — callers must drop
+ * the event rather than falling back to '*' (wildcard targets leak
+ * trace payloads to any ancestor).
  */
-const _parentOrigin: string = (() => {
+const _parentOrigin: string | null = (() => {
   try {
     // ancestorOrigins is available in Chromium and Safari
     if (window.location.ancestorOrigins?.length) {
-      return window.location.ancestorOrigins[0];
+      const origin = window.location.ancestorOrigins[0];
+      if (origin.startsWith('http://') || origin.startsWith('https://')) return origin;
+      return null;
     }
   } catch { /* sandboxed iframe may throw */ }
 
@@ -161,14 +176,39 @@ const _parentOrigin: string = (() => {
     }
   } catch { /* malformed referrer */ }
 
-  return '*';
+  return null;
 })();
 
+// Bounded outbox: cap queued trace events so a hot loop cannot grow memory.
+const MAX_QUEUE = 200;
+const _outbox: TraceEvent[] = [];
+let _flushScheduled = false;
+
+function flushOutbox(): void {
+  _flushScheduled = false;
+  if (!_parentOrigin) {
+    _outbox.length = 0;
+    return;
+  }
+  const target = _parentOrigin;
+  while (_outbox.length > 0) {
+    const event = _outbox.shift()!;
+    try {
+      window.parent.postMessage({ type: 'studio-trace-event', event }, target);
+    } catch {
+      /* ignore */
+    }
+  }
+}
+
 function emit(event: TraceEvent): void {
-  try {
-    window.parent.postMessage({ type: 'studio-trace-event', event }, _parentOrigin);
-  } catch {
-    /* ignore */
+  if (!IS_DEV || !_enabled) return;
+  if (!_parentOrigin) return;
+  if (_outbox.length >= MAX_QUEUE) _outbox.shift(); // drop oldest (bounded)
+  _outbox.push(event);
+  if (!_flushScheduled) {
+    _flushScheduled = true;
+    queueMicrotask(flushOutbox);
   }
 }
 
@@ -216,6 +256,7 @@ function parseChainId(raw: unknown): number {
 let _enabled = false;
 
 window.addEventListener('message', (e: MessageEvent<MessageData>) => {
+  if (!IS_DEV) return;
   if (e.source !== window.parent) {
     return;
   }
@@ -230,6 +271,15 @@ const NOISE = ['/_vite/', '/@vite/', '/@id/', '/node_modules/.vite/', 'chrome-ex
 
 function isNoise(url: string): boolean {
   return NOISE.some((p) => url.includes(p));
+}
+
+const ASSET_EXT_RE = /\.(js|mjs|cjs|css|png|jpe?g|gif|svg|ico|woff2?|ttf|otf|map|webp|avif|mp4)(\?|#|$)/i;
+
+/** Skip high-volume, low-value requests: GET polls and static assets. */
+function shouldSkipTrace(method: string, url: string): boolean {
+  if (method.toUpperCase() === 'GET') return true;
+  if (ASSET_EXT_RE.test(url)) return true;
+  return false;
 }
 
 // ---------------------------------------------------------------------------
@@ -268,6 +318,11 @@ function chainForUrl(url: string): number {
 function learnChain(url: string, chainId: number): void {
   const h = host(url);
   if (h && chainId > 0) {
+    // Bound map: evict oldest entry when over cap.
+    if (_chainByHost.size >= 50 && !_chainByHost.has(h)) {
+      const oldest = _chainByHost.keys().next().value;
+      if (oldest !== undefined) _chainByHost.delete(oldest);
+    }
     _chainByHost.set(h, chainId);
     log('chain learned:', h, '→', chainId);
   }
@@ -360,7 +415,9 @@ try {
       // Noise-match the raw target, not the absolutized URL: the dev preview host
       // (<id>.preview.localhost:5173) contains the "localhost:5173" NOISE substring,
       // so matching the absolute URL would drop every same-origin request in dev.
-      if (!_enabled || isNoise(rawUrl)) return _fetch.call(globalThis, input, init);
+      if (!IS_DEV || !_enabled || isNoise(rawUrl) || shouldSkipTrace(method, url)) {
+        return _fetch.call(globalThis, input, init);
+      }
       if (init?.body) reqBody = tryJson(truncate(typeof init.body === 'string' ? init.body : stringify(init.body)));
     } catch {
       return _fetch.call(globalThis, input, init);
@@ -429,7 +486,7 @@ function patchProvider(provider: EIP1193Provider | undefined): void {
 
   provider.request = async (args: { method: string; params?: unknown[] }): Promise<unknown> => {
     const ts = Date.now();
-    if (!_enabled) return _request(args);
+    if (!IS_DEV || !_enabled) return _request(args);
 
     const method = args.method;
     const params = (args.params ?? []);

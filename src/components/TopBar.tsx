@@ -1,3 +1,8 @@
+// DEPRECATED (P0 dual-store): legacy TopBar using src/store.ts + src/types.ts.
+// Not routed by src/App.tsx (which uses Navigation.MobileTopBar). The
+// `actions.navigate('explore')` below refers to legacy ActiveView 'explore',
+// which maps 1:1 to modern NavView 'explore' (SocialFeed) in App.tsx — no
+// separate mapping needed. Kept so `tsc --noEmit` still passes.
 import { ArrowLeft, PenSquare, Search, Moon, Sun } from 'lucide-react'
 import { ConnectKitButton } from 'connectkit'
 import { useAccount } from 'wagmi'
