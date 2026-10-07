@@ -520,6 +520,15 @@ export const appStore = {
     }))
   },
 
+  bumpConversationUnread(conversationId: string) {
+    setState((s) => ({
+      ...s,
+      conversations: s.conversations.map((c) =>
+        c.id === conversationId ? { ...c, unreadCount: (c.unreadCount ?? 0) + 1 } : c,
+      ),
+    }))
+  },
+
   updatePaymentMessageStatus(conversationId: string, txHash: string, status: PaymentMessage['status']) {
     setState((s) => ({
       ...s,
@@ -923,6 +932,124 @@ export const appStore = {
           ? s.conversations.map((c) => (c.id === conversationId ? { ...c, lastMessage: last } : c))
           : s.conversations,
       }
+    })
+  },
+
+  // ── Turso import for social feed (posts / comments / profiles) ────────────
+  // Server wins per id; local-only ids never synced are kept; ids that were
+  // synced before but are now missing server-side were deleted elsewhere.
+  importPosts(posts: Post[], postedIds?: Set<string>) {
+    if (!Array.isArray(posts)) return
+    setState((s) => {
+      const serverIds = new Set<string>()
+      const merged: Post[] = []
+      for (const p of posts) {
+        if (!p || typeof p.id !== 'string' || serverIds.has(p.id)) continue
+        serverIds.add(p.id)
+        merged.push({
+          ...p,
+          authorAddress: typeof p.authorAddress === 'string' ? p.authorAddress : '',
+          content: typeof p.content === 'string' ? p.content : '',
+          createdAt: typeof p.createdAt === 'number' ? p.createdAt : Date.now(),
+          likeCount: typeof p.likeCount === 'number' ? p.likeCount : 0,
+          commentCount: typeof p.commentCount === 'number' ? p.commentCount : 0,
+          repostCount: typeof p.repostCount === 'number' ? p.repostCount : 0,
+          likes: Array.isArray(p.likes) ? p.likes : [],
+          reposts: Array.isArray(p.reposts) ? p.reposts : [],
+        })
+      }
+      for (const local of s.posts) {
+        if (serverIds.has(local.id)) continue
+        if (postedIds && postedIds.has(local.id)) continue // deleted elsewhere
+        merged.push(local)
+      }
+      merged.sort((a, b) => b.createdAt - a.createdAt)
+      return { ...s, posts: merged }
+    })
+  },
+
+  importComments(comments: Comment[], postedIds?: Set<string>) {
+    if (!Array.isArray(comments)) return
+    setState((s) => {
+      const serverIds = new Set<string>()
+      const merged: Comment[] = []
+      for (const c of comments) {
+        if (!c || typeof c.id !== 'string' || serverIds.has(c.id)) continue
+        serverIds.add(c.id)
+        merged.push({
+          ...c,
+          postId: typeof c.postId === 'string' ? c.postId : '',
+          authorAddress: typeof c.authorAddress === 'string' ? c.authorAddress : '',
+          content: typeof c.content === 'string' ? c.content : '',
+          createdAt: typeof c.createdAt === 'number' ? c.createdAt : Date.now(),
+        })
+      }
+      for (const local of s.comments) {
+        if (serverIds.has(local.id)) continue
+        if (postedIds && postedIds.has(local.id)) continue // deleted elsewhere
+        merged.push(local)
+      }
+      merged.sort((a, b) => a.createdAt - b.createdAt)
+      return { ...s, comments: merged }
+    })
+  },
+
+  importProfiles(profiles: UserProfile[], postedKeys?: Set<string>) {
+    if (!Array.isArray(profiles)) return
+    // Store keys are checksummed; hook tracking keys are lowercase — compare loosely.
+    const postedLower = new Set([...(postedKeys ?? [])].map((k) => k.toLowerCase()))
+    setState((s) => {
+      const next: Record<string, UserProfile> = {}
+      for (const p of profiles) {
+        if (!p || typeof p.address !== 'string') continue
+        const key = normalizeAddress(p.address)
+        next[key] = {
+          address: key,
+          username: typeof p.username === 'string' ? p.username : '',
+          bio: typeof p.bio === 'string' ? p.bio : '',
+          avatarSeed: typeof p.avatarSeed === 'string' ? p.avatarSeed : key,
+          followerCount: typeof p.followerCount === 'number' ? p.followerCount : 0,
+          followingCount: typeof p.followingCount === 'number' ? p.followingCount : 0,
+          createdAt: typeof p.createdAt === 'number' ? p.createdAt : Date.now(),
+        }
+      }
+      for (const [key, local] of Object.entries(s.profiles)) {
+        if (next[key]) continue // server wins
+        if (postedLower.has(key.toLowerCase())) continue
+        next[key] = local
+      }
+      return { ...s, profiles: next }
+    })
+  },
+
+  // ── Turso import for payment history ──────────────────────────────────────
+  // Merge by txHash (case-insensitive); server wins per hash so
+  // pending → confirmed transitions converge across devices.
+  importTxRecords(records: TxRecord[], postedHashes?: Set<string>) {
+    if (!Array.isArray(records)) return
+    const postedLower = new Set([...(postedHashes ?? [])].map((h) => h.toLowerCase()))
+    setState((s) => {
+      const serverHashes = new Set<string>()
+      const merged: TxRecord[] = []
+      for (const r of records) {
+        if (!r || typeof r.txHash !== 'string') continue
+        const needle = r.txHash.toLowerCase()
+        if (serverHashes.has(needle)) continue
+        serverHashes.add(needle)
+        merged.push({
+          ...r,
+          timestamp: typeof r.timestamp === 'number' ? r.timestamp : Date.now(),
+          status: (r.status as TxRecord['status']) ?? 'pending',
+        })
+      }
+      for (const local of s.txHistory) {
+        const needle = local.txHash.toLowerCase()
+        if (serverHashes.has(needle)) continue
+        if (postedLower.has(needle)) continue
+        merged.push(local)
+      }
+      merged.sort((a, b) => b.timestamp - a.timestamp)
+      return { ...s, txHistory: merged }
     })
   },
 }

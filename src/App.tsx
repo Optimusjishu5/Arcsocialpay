@@ -5,6 +5,8 @@ import { motion, AnimatePresence } from 'framer-motion'
 import { isAddress } from 'viem'
 import { useArcAccount } from './hooks/useArcWallet'
 import { usePersistentChat } from './hooks/usePersistentChat'
+import { usePersistentSocial } from './hooks/usePersistentSocial'
+import { usePersistentTxHistory } from './hooks/usePersistentTxHistory'
 import { appStore, useTheme } from './store/appStore'
 import { Dashboard } from './components/Dashboard'
 import { MessagesView } from './components/MessagesView'
@@ -16,7 +18,7 @@ import { DesktopNav, MobileNav, MobileTopBar } from './components/Navigation'
 import type { NavView } from './types/index'
 
 const VIEW_TITLES: Record<NavView, string> = {
-  home: 'Arc SocialPay',
+  home: 'SocialPay',
   messages: 'Messages',
   pay: 'Payments',
   explore: 'Explore',
@@ -72,6 +74,12 @@ export default function App() {
   // Persistent chat: hydrate from Turso + write-through when configured.
   // No-op (localStorage only) when TURSO_* env vars are missing.
   usePersistentChat(address)
+
+  // Persistent social feed: posts/comments/profiles, same Turso pattern.
+  usePersistentSocial(address)
+
+  // Persistent payment history: normal pay + tips render correctly everywhere.
+  usePersistentTxHistory(address)
 
   function navigate(view: NavView, extra?: Record<string, string>) {
     setNav({ view, extra })

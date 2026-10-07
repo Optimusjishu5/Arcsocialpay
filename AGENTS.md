@@ -1,4 +1,4 @@
-# Arc SocialPay
+# SocialPay
 
 > Built with Arc Studio - money-powered apps in minutes
 

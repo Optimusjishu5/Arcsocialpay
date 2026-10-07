@@ -112,5 +112,7 @@ function getNotifMeta(notif: Notification): { icon: React.ReactNode; color: stri
       return { icon: <DollarSign size={10} />, color: 'var(--accent)', text: 'sent you USDC' }
     case 'mention':
       return { icon: <AtSign size={10} />, color: '#0d7460', text: 'mentioned you' }
+    case 'message':
+      return { icon: <MessageCircle size={10} />, color: 'var(--accent)', text: 'sent you a message' }
   }
 }

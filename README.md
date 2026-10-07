@@ -1,4 +1,4 @@
-# Arc SocialPay (Next.js + Turso + Arc Mainnet)
+# SocialPay (Next.js + Turso + Arc Mainnet)
 
 > Built with Arc Studio - money-powered apps in minutes
 
