@@ -1,5 +1,5 @@
 import { CheckCircle2, Clock, XCircle, Loader2 } from 'lucide-react'
-import type { TxStatus } from '../../types'
+import type { TxStatus } from '../../types/index'
 
 interface Props {
   status: TxStatus

@@ -188,7 +188,7 @@ export function useSocialPay() {
       setStatus('done')
     } else if (actionReceipt?.status === 'reverted' || actionReceiptError) {
       fail('Transaction failed onchain (reverted). Your payment was not sent.')
-    } else if (actionTx.error && status !== 'idle') {
+    } else if (actionTx.error) {
       const msg = actionTx.error.message?.toLowerCase() ?? ''
       fail(
         msg.includes('user rejected') || msg.includes('denied')

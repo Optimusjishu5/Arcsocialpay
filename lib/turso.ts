@@ -218,7 +218,7 @@ export async function updatePaymentStatus(txHash: string, status: string): Promi
   const rs = await db.execute(`SELECT id, payment_tx FROM messages WHERE payment_tx IS NOT NULL LIMIT 1000`)
   const needle = txHash.toLowerCase()
   for (const row of rs.rows) {
-    const pay = parseJson<Record<string, unknown>>(row.payment_tx, null)
+    const pay = parseJson<Record<string, unknown> | null>(row.payment_tx, null)
     if (!pay) continue
     const hash = String((pay as { txHash?: unknown }).txHash ?? '').toLowerCase()
     if (hash !== needle) continue
