@@ -433,7 +433,7 @@ function SendForm({
           </PreviewRow>
           {useContract && (
             <PreviewRow label="Route">
-              <span className="text-sm" style={{ color: 'var(--ink-2)' }}>ArcSocialPay contract</span>
+              <span className="text-sm" style={{ color: 'var(--ink-2)' }}>SocialPay contract</span>
             </PreviewRow>
           )}
           {note && <PreviewRow label="Note"><span className="text-sm" style={{ color: 'var(--ink-2)' }}>{note}</span></PreviewRow>}

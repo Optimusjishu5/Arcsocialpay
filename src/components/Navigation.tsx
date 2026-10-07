@@ -41,15 +41,8 @@ export function DesktopNav({ current, onNavigate }: Props) {
       }}>
       {/* Logo */}
       <div className="px-5 py-5">
-        <div className="flex items-center gap-2.5">
-          <div className="w-8 h-8 rounded-xl flex items-center justify-center"
-            style={{ background: 'var(--accent)' }}>
-            <DollarSign size={16} style={{ color: '#fff' }} />
-          </div>
-          <span className="display font-bold text-base" style={{ color: 'var(--ink)', letterSpacing: '-0.02em' }}>
-            SocialPay
-          </span>
-        </div>
+        <img src="/logofull.png" alt="SocialPay" width={120} height={48}
+          style={{ height: 32, width: 'auto', objectFit: 'contain', objectPosition: 'left center' }} />
       </div>
 
       {/* Nav items */}
@@ -185,10 +178,8 @@ export function MobileTopBar({ title, onNavigate: _onNavigate }: { title: string
     <div className="md:hidden flex items-center justify-between px-4 py-3 sticky top-0 z-40"
       style={{ background: 'var(--surface)', borderBottom: '1px solid var(--border)', backdropFilter: 'blur(12px)' }}>
       <div className="flex items-center gap-2">
-        <div className="w-7 h-7 rounded-lg flex items-center justify-center"
-          style={{ background: 'var(--accent)' }}>
-          <DollarSign size={14} style={{ color: '#fff' }} />
-        </div>
+        <img src="/logo.png" alt="SocialPay logo" width={28} height={28}
+          className="rounded-lg" style={{ width: 28, height: 28, objectFit: 'cover' }} />
         <span className="display font-bold text-sm" style={{ color: 'var(--ink)' }}>{title}</span>
       </div>
       <div className="flex items-center gap-2">

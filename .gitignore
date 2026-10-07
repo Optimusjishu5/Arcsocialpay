@@ -22,6 +22,9 @@ cache/
 # TypeScript
 *.tsbuildinfo
 
+# Agent working memory (never commit)
+**/CONTEXT.md
+
 # Compass fork-verify receipts
 .compass-verify/
 contracts/.compass-verify/

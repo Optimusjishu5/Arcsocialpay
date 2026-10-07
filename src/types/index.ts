@@ -113,7 +113,7 @@ export interface TxRecord {
 
 // ── Notification ───────────────────────────────────────────────────────────
 
-export type NotifType = 'like' | 'comment' | 'repost' | 'follow' | 'payment' | 'mention'
+export type NotifType = 'like' | 'comment' | 'repost' | 'follow' | 'payment' | 'mention' | 'message'
 
 export interface Notification {
   id: string

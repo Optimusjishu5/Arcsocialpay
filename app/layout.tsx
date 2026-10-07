@@ -1,9 +1,13 @@
 import type { Metadata, Viewport } from 'next'
 
 export const metadata: Metadata = {
-  title: 'Arc SocialPay',
-  description: 'Arc SocialPay — Social messaging and native USDC payments on Arc blockchain',
+  title: 'SocialPay',
+  description: 'SocialPay — Social messaging and native USDC payments on Arc blockchain',
   generator: 'Arc Studio by Circle — https://studio.arc.io',
+  icons: {
+    icon: '/favicon.ico',
+    apple: '/apple-touch-icon.png',
+  },
 }
 
 export const viewport: Viewport = {

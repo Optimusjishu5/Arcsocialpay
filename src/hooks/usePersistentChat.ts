@@ -197,4 +197,78 @@ export function usePersistentChat(address: string | undefined) {
       clearInterval(iv)
     }
   }, [address])
+
+  // 3) Incoming: poll Turso so messages sent by the other side appear without
+  //    a manual refresh. Fresh inbound messages bump unread + raise a
+  //    notification (previously nothing created notifications for chat).
+  useEffect(() => {
+    if (!address) return
+    const me = address.toLowerCase()
+    let disabled = false // Turso not configured — stop polling after first probe
+    let inFlight = false
+
+    const tick = () => {
+      if (disabled || inFlight) return
+      inFlight = true
+      void (async () => {
+        try {
+          const convRes = await fetch(`/api/conversations?address=${encodeURIComponent(address)}`)
+          if (!convRes.ok) return
+          const convJson = await safeJson(convRes)
+          if (convJson.configured === false) {
+            disabled = true
+            return
+          }
+          const convs = Array.isArray(convJson.conversations)
+            ? (convJson.conversations as unknown[]).map(toConversation).filter((c): c is Conversation => !!c)
+            : []
+          if (convs.length > 0) appStore.importConversations(convs)
+          // Server convs plus local-only ones (not yet posted).
+          const ids = new Set(convs.map((c) => c.id))
+          for (const c of appStore.getState().conversations) {
+            if ((c.participants ?? []).some((p) => p.toLowerCase() === me)) ids.add(c.id)
+          }
+          for (const id of [...ids].slice(0, 30)) {
+            try {
+              const msgRes = await fetch(`/api/messages?conversationId=${encodeURIComponent(id)}`)
+              if (!msgRes.ok) continue
+              const msgJson = await safeJson(msgRes)
+              if (msgJson.configured === false) {
+                disabled = true
+                break
+              }
+              const msgs = Array.isArray(msgJson.messages)
+                ? (msgJson.messages as unknown[]).map(toMessage).filter((m): m is Message => !!m)
+                : []
+              if (msgs.length === 0) continue
+              const fresh = msgs.filter((m) => !postedMsgs.current.has(m.id))
+              appStore.importMessages(id, msgs)
+              for (const m of msgs) postedMsgs.current.add(m.id)
+              const inbound = fresh.filter((m) => m.senderAddress.toLowerCase() !== me)
+              if (inbound.length === 0) continue
+              for (const m of inbound) appStore.bumpConversationUnread(m.conversationId)
+              const latest = inbound[inbound.length - 1]
+              appStore.addNotification({
+                type: 'message',
+                fromAddress: latest.senderAddress,
+                targetId: id,
+                content: latest.content.slice(0, 120),
+                createdAt: Date.now(),
+              })
+            } catch {
+              // per-conv failure must not break other convs
+            }
+          }
+        } catch {
+          // offline / server down — retry on next tick
+        } finally {
+          inFlight = false
+        }
+      })()
+    }
+
+    tick()
+    const iv = setInterval(tick, 4000)
+    return () => clearInterval(iv)
+  }, [address])
 }

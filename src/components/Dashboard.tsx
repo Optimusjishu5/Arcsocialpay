@@ -64,7 +64,7 @@ export function Dashboard({ onNavigate }: Props) {
             <TokenUSDC variant="branded" size={48} />
           </div>
           <h1 className="display font-bold text-3xl mb-2" style={{ color: 'var(--ink)', letterSpacing: '-0.03em' }}>
-            Arc SocialPay
+            SocialPay
           </h1>
           <p className="text-base mb-8 max-w-xs mx-auto" style={{ color: 'var(--muted)' }}>
             Social messaging with native USDC payments on Arc blockchain
