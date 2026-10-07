@@ -69,9 +69,11 @@ const LOG = '[studio-trace]';
 
 // Only trace in dev preview. In production builds this module is a no-op
 // (emit drops events, fetch/provider patches pass through untouched).
+// Next.js safe: no import.meta, guarded window access for SSR.
 const IS_DEV: boolean = (() => {
   try {
-    return import.meta.env.DEV === true;
+    if (typeof process !== 'undefined' && process.env?.NODE_ENV === 'development') return true;
+    return false;
   } catch {
     return false;
   }
@@ -117,6 +119,7 @@ interface StudioTraceAPI {
 }
 
 function setupTraceAPI(): void {
+  if (typeof window === 'undefined') return;
   const api: StudioTraceAPI = {
     startGroup(label: string): string {
       const groupId = id();
@@ -143,7 +146,9 @@ function setupTraceAPI(): void {
   (window as unknown as { __studioTrace: StudioTraceAPI }).__studioTrace = api;
 }
 
-setupTraceAPI();
+if (typeof window !== 'undefined') {
+  setupTraceAPI();
+}
 
 // ---------------------------------------------------------------------------
 // emitWithGroups — attaches current group ancestry to RPC/HTTP events
@@ -162,6 +167,7 @@ function emitWithGroups(event: RpcTraceEvent | HttpTraceEvent): void {
  */
 const _parentOrigin: string | null = (() => {
   try {
+    if (typeof window === 'undefined') return null;
     // ancestorOrigins is available in Chromium and Safari
     if (window.location.ancestorOrigins?.length) {
       const origin = window.location.ancestorOrigins[0];
@@ -171,7 +177,7 @@ const _parentOrigin: string | null = (() => {
   } catch { /* sandboxed iframe may throw */ }
 
   try {
-    if (document.referrer) {
+    if (typeof document !== 'undefined' && document.referrer) {
       return new URL(document.referrer).origin;
     }
   } catch { /* malformed referrer */ }
@@ -187,6 +193,10 @@ let _flushScheduled = false;
 function flushOutbox(): void {
   _flushScheduled = false;
   if (!_parentOrigin) {
+    _outbox.length = 0;
+    return;
+  }
+  if (typeof window === 'undefined') {
     _outbox.length = 0;
     return;
   }
@@ -255,17 +265,21 @@ function parseChainId(raw: unknown): number {
 
 let _enabled = false;
 
-window.addEventListener('message', (e: MessageEvent<MessageData>) => {
-  if (!IS_DEV) return;
-  if (e.source !== window.parent) {
-    return;
-  }
+try {
+  if (typeof window !== 'undefined') {
+    window.addEventListener('message', (e: MessageEvent<MessageData>) => {
+      if (!IS_DEV) return;
+      if (e.source !== window.parent) {
+        return;
+      }
 
-  if (e.data?.type === 'studio-trace-config') {
-    _enabled = !!e.data.enabled;
-    log('tracing', _enabled ? 'enabled' : 'disabled');
+      if (e.data?.type === 'studio-trace-config') {
+        _enabled = !!e.data.enabled;
+        log('tracing', _enabled ? 'enabled' : 'disabled');
+      }
+    });
   }
-});
+} catch { /* SSR: no window */ }
 
 const NOISE = ['/_vite/', '/@vite/', '/@id/', '/node_modules/.vite/', 'chrome-extension://', 'localhost:5173'];
 
@@ -304,7 +318,10 @@ function host(url: string): string {
  */
 function toAbsoluteUrl(raw: string): string {
   try {
-    return new URL(raw, window.location.href).href;
+    if (typeof window !== 'undefined' && window.location?.href) {
+      return new URL(raw, window.location.href).href;
+    }
+    return raw;
   } catch {
     return raw;
   }
@@ -531,28 +548,30 @@ function patchProvider(provider: EIP1193Provider | undefined): void {
 }
 
 try {
-  // Case 1: provider already exists
-  const existingProvider = getEthereum();
-  if (existingProvider) {
-    patchProvider(existingProvider);
+  if (typeof window !== 'undefined') {
+    // Case 1: provider already exists
+    const existingProvider = getEthereum();
+    if (existingProvider) {
+      patchProvider(existingProvider);
+    }
+
+    // Case 2: provider set later (wallet extensions inject asynchronously)
+    let _eth: EIP1193Provider | undefined = existingProvider;
+    Object.defineProperty(window, 'ethereum', {
+      configurable: true,
+      enumerable: true,
+      get() { return _eth; },
+      set(v: EIP1193Provider | undefined) {
+        _eth = v;
+        patchProvider(v);
+      },
+    });
+
+    // Case 3: EIP-6963 multi-provider discovery
+    window.addEventListener('eip6963:announceProvider', ((e: EIP6963AnnounceProviderEvent) => {
+      patchProvider(e?.detail?.provider);
+    }));
   }
-
-  // Case 2: provider set later (wallet extensions inject asynchronously)
-  let _eth: EIP1193Provider | undefined = existingProvider;
-  Object.defineProperty(window, 'ethereum', {
-    configurable: true,
-    enumerable: true,
-    get() { return _eth; },
-    set(v: EIP1193Provider | undefined) {
-      _eth = v;
-      patchProvider(v);
-    },
-  });
-
-  // Case 3: EIP-6963 multi-provider discovery
-  window.addEventListener('eip6963:announceProvider', ((e: EIP6963AnnounceProviderEvent) => {
-    patchProvider(e?.detail?.provider);
-  }));
 } catch (e) { log('EIP-1193 patch FAILED', e); }
 
 log('initialized');

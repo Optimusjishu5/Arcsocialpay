@@ -5,7 +5,9 @@
 # Deps
 node_modules/
 
-# Vite build output
+# Next.js build output
+.next/
+out/
 dist/
 
 # Foundry build artifacts
@@ -15,6 +17,10 @@ contracts/cache/
 # Hardhat build artifacts (see hardhat.config.ts paths)
 artifacts/
 cache_hardhat/
+cache/
+
+# TypeScript
+*.tsbuildinfo
 
 # Compass fork-verify receipts
 .compass-verify/

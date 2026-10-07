@@ -1,8 +1,9 @@
 /**
- * Env parsing — fails fast on invalid VITE_* values.
+ * Env parsing — fails fast on invalid values.
  *
- * Manual parse (no zod dependency): trims, validates https://, and throws at
- * import time so misconfiguration surfaces immediately instead of at first RPC call.
+ * Next.js App Router: uses NEXT_PUBLIC_* so values are available in the
+ * browser. Trims, validates https://, and throws at import time so
+ * misconfiguration surfaces immediately instead of at first RPC call.
  * Returns `undefined` when unset/empty so callers can fall back to chain defaults.
  */
 
@@ -25,8 +26,8 @@ function parseHttpsUrlOrUndefined(raw: unknown, name: string): string | undefine
   return trimmed;
 }
 
-/** Optional override for the Arc Testnet RPC. Falls back to viem's chain default when unset. */
-export const VITE_ARC_TESTNET_RPC: string | undefined = parseHttpsUrlOrUndefined(
-  import.meta.env.VITE_ARC_TESTNET_RPC,
-  'VITE_ARC_TESTNET_RPC',
+/** Optional override for the Arc Mainnet RPC. Falls back to chain default when unset. */
+export const NEXT_PUBLIC_ARC_RPC: string | undefined = parseHttpsUrlOrUndefined(
+  typeof process !== 'undefined' ? process.env.NEXT_PUBLIC_ARC_RPC : undefined,
+  'NEXT_PUBLIC_ARC_RPC',
 );

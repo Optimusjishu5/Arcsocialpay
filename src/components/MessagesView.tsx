@@ -9,6 +9,7 @@ import { isAddress } from 'viem'
 import { useWaitForTransactionReceipt } from 'wagmi'
 import { ConnectKitButton } from 'connectkit'
 import { useArcAccount, useUsdcBalance, useSendUsdc, ARC_CHAIN_ID, USDC_ADDRESS } from '../hooks/useArcWallet'
+import { useSocialPay } from '../hooks/useSocialPay'
 import { appStore, useAppStore } from '../store/appStore'
 import { Avatar } from './ui/Avatar'
 import { Button } from './ui/Button'
@@ -459,7 +460,11 @@ function InChatPayModal({ open, onClose, convId, myAddress, recipient }: {
   recipient: string
 }) {
   const { display: balanceDisplay, raw: balanceRaw, refetch } = useUsdcBalance(myAddress as `0x${string}`)
-  const { send, hash, isPending, isConfirming, isSuccess, isError, error, reset } = useSendUsdc()
+  const { send, hash, isPending, isConfirming, isError, error, reset } = useSendUsdc()
+  // ArcSocialPay contract path — active once NEXT_PUBLIC_SOCIAL_PAY_ADDRESS is set.
+  const sp = useSocialPay()
+  const useContract = sp.isConfigured
+  const activeHash = useContract ? sp.actionHash : hash
   const [amount, setAmount] = useState('')
   const [localError, setLocalError] = useState('')
   const [receiptFailed, setReceiptFailed] = useState(false)
@@ -469,15 +474,17 @@ function InChatPayModal({ open, onClose, convId, myAddress, recipient }: {
   const paySnapshotRef = useRef<{ amount: string; recipient: string; convId: string; myAddress: string } | null>(null)
 
   // Independent receipt read — isSuccess alone only means "receipt fetched".
+  // Direct-path only; the contract path reads sp.actionReceipt instead.
   const { data: receipt, isError: isReceiptError } = useWaitForTransactionReceipt({ hash })
+  const activeReceipt = useContract ? sp.actionReceipt : receipt
 
   // H1: record pending as soon as we have a hash (don't wait for confirmation).
   useEffect(() => {
-    if (hash && pendingHashRef.current !== hash) {
-      pendingHashRef.current = hash
+    if (activeHash && pendingHashRef.current !== activeHash) {
+      pendingHashRef.current = activeHash
       const snap = paySnapshotRef.current ?? { amount, recipient, convId, myAddress }
       const payTx: PaymentMessage = {
-        txHash: hash,
+        txHash: activeHash,
         amount: snap.amount,
         sender: snap.myAddress,
         recipient: snap.recipient,
@@ -488,28 +495,28 @@ function InChatPayModal({ open, onClose, convId, myAddress, recipient }: {
       refetch().catch(() => toast.error('Failed to refresh balance'))
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [hash])
+  }, [activeHash])
 
   // H1: flip pending -> confirmed only on receipt.status === 'success', else failed.
   useEffect(() => {
-    if (!hash) return
+    if (!activeHash) return
     const snapConvId = paySnapshotRef.current?.convId ?? convId
-    if (receipt?.status === 'success') {
-      appStore.updatePaymentMessageStatus(snapConvId, hash, 'confirmed')
+    if (activeReceipt?.status === 'success') {
+      appStore.updatePaymentMessageStatus(snapConvId, activeHash, 'confirmed')
       refetch().catch(() => toast.error('Failed to refresh balance'))
       setReceiptFailed(false)
       // defer non-setState calls to avoid cascade render warning
-      setTimeout(() => { onClose(); reset(); setAmount(''); setLocalError(''); pendingHashRef.current = null; paySnapshotRef.current = null }, 0)
-    } else if (receipt?.status === 'reverted' || isReceiptError) {
-      appStore.updatePaymentMessageStatus(snapConvId, hash, 'failed')
+      setTimeout(() => { onClose(); reset(); sp.reset(); setAmount(''); setLocalError(''); pendingHashRef.current = null; paySnapshotRef.current = null }, 0)
+    } else if (activeReceipt?.status === 'reverted' || (!useContract && isReceiptError)) {
+      appStore.updatePaymentMessageStatus(snapConvId, activeHash, 'failed')
       setReceiptFailed(true)
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [receipt, isReceiptError, hash, isSuccess])
+  }, [activeReceipt, useContract, isReceiptError, activeHash])
 
   function handleSend() {
     // M4: block double-submit.
-    if (isPending || isConfirming) return
+    if (isPending || isConfirming || sp.isBusy) return
     setLocalError('')
     setReceiptFailed(false)
     // M8: recipient + self checks (also guards zero / USDC contract).
@@ -531,6 +538,16 @@ function InChatPayModal({ open, onClose, convId, myAddress, recipient }: {
     const bal = Number(balanceRaw) / 1_000_000
     if (n > bal) { setLocalError('Insufficient balance'); return }
     paySnapshotRef.current = { amount: trimmed, recipient, convId, myAddress }
+    // Contract path: approve (if needed) then ArcSocialPay.pay(recipient, raw, '').
+    // Chat text stays off-chain; the receipt effects above handle both paths.
+    if (useContract) {
+      try {
+        void sp.requestPay(recipient, trimmed, '')
+      } catch (e) {
+        setLocalError(parseOnchainError(e))
+      }
+      return
+    }
     try {
       void send(recipient as `0x${string}`, trimmed)
     } catch (e) {
@@ -539,10 +556,21 @@ function InChatPayModal({ open, onClose, convId, myAddress, recipient }: {
   }
 
   const baseErr = isError ? parseOnchainError(error) : ''
-  const errMsg = localError || (receiptFailed ? 'Transaction failed onchain (reverted).' : baseErr)
+  const contractErr = useContract && sp.error ? parseOnchainError(sp.error) : ''
+  const errMsg = localError || (receiptFailed ? 'Transaction failed onchain (reverted).' : contractErr || baseErr)
+  const busyText = useContract
+    ? sp.status === 'approving'
+      ? 'Approve in wallet...'
+      : sp.status === 'sending'
+        ? 'Confirm in wallet...'
+        : 'Confirming...'
+    : isPending
+      ? 'Confirm in wallet...'
+      : 'Confirming...'
+  const busy = useContract ? sp.isBusy : (isPending || isConfirming)
 
   return (
-    <Modal open={open} onClose={() => { if (!isPending && !isConfirming) { onClose(); reset(); setAmount(''); setLocalError('') } }} title="Send USDC in Chat">
+    <Modal open={open} onClose={() => { if (!busy) { onClose(); reset(); sp.reset(); setAmount(''); setLocalError('') } }} title="Send USDC in Chat">
       <div className="space-y-4">
         <div className="flex items-center gap-3 p-3 rounded-xl" style={{ background: 'var(--surface-muted)' }}>
           <Avatar address={recipient} size={36} />
@@ -574,12 +602,12 @@ function InChatPayModal({ open, onClose, convId, myAddress, recipient }: {
             <span className="text-sm">{errMsg}</span>
           </div>
         )}
-        {(isPending || isConfirming) ? (
+        {(busy) ? (
           <div className="flex justify-center py-2">
-            <TxSpinner text={isPending ? 'Confirm in wallet...' : 'Confirming...'} />
+            <TxSpinner text={busyText} />
           </div>
         ) : (
-          <Button className="w-full" size="lg" onClick={handleSend} disabled={!amount.trim() || isPending || isConfirming}>
+          <Button className="w-full" size="lg" onClick={handleSend} disabled={!amount.trim() || busy}>
             Send {amount || '0'} USDC
           </Button>
         )}

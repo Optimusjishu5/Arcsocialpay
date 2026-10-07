@@ -35,9 +35,11 @@ const MAX_REPEAT_BEFORE_FLUSH = 500;
 
 // Only capture in dev preview — production builds preserve console behaviour
 // but never postMessage anything out.
+// Next.js safe: uses NODE_ENV instead of import.meta, guards window for SSR.
 const IS_DEV: boolean = (() => {
   try {
-    return import.meta.env.DEV === true;
+    if (typeof process !== 'undefined' && process.env?.NODE_ENV === 'development') return true;
+    return false;
   } catch {
     return false;
   }
@@ -54,6 +56,7 @@ const LEVELS: ConsoleLevel[] = ['log', 'info', 'warn', 'error', 'debug'];
 
 const _parentOrigin: string | null = (() => {
   try {
+    if (typeof window === 'undefined') return null;
     if (window.location.ancestorOrigins?.length) {
       const origin = window.location.ancestorOrigins[0];
       if (origin.startsWith('http://') || origin.startsWith('https://')) return origin;
@@ -64,7 +67,7 @@ const _parentOrigin: string | null = (() => {
   }
 
   try {
-    if (document.referrer) {
+    if (typeof document !== 'undefined' && document.referrer) {
       return new URL(document.referrer).origin;
     }
   } catch {
@@ -148,6 +151,7 @@ let _dropped = 0;
 
 function send(entry: ConsoleLogEntry): void {
   if (!IS_DEV || !_parentOrigin) return;
+  if (typeof window === 'undefined') return;
   try {
     window.parent.postMessage({ type: MESSAGE_TYPE, entry }, _parentOrigin);
   } catch {
@@ -244,35 +248,37 @@ for (const level of LEVELS) {
 // Uncaught errors & unhandled rejections — the signals a blank preview hides
 // ---------------------------------------------------------------------------
 
-window.addEventListener('error', (e: ErrorEvent) => {
-  if (!IS_DEV) return;
-  try {
-    flushRepeat();
-    const source = e.filename ? `${e.filename}:${e.lineno ?? 0}:${e.colno ?? 0}` : undefined;
-    post({
-      level: 'error',
-      message: truncate(e.message || 'Uncaught error'),
-      timestamp: Date.now(),
-      source,
-      stack: e.error instanceof Error ? truncateStack(e.error.stack) : undefined,
-    });
-  } catch {
-    /* ignore */
-  }
-});
+if (typeof window !== 'undefined') {
+  window.addEventListener('error', (e: ErrorEvent) => {
+    if (!IS_DEV) return;
+    try {
+      flushRepeat();
+      const source = e.filename ? `${e.filename}:${e.lineno ?? 0}:${e.colno ?? 0}` : undefined;
+      post({
+        level: 'error',
+        message: truncate(e.message || 'Uncaught error'),
+        timestamp: Date.now(),
+        source,
+        stack: e.error instanceof Error ? truncateStack(e.error.stack) : undefined,
+      });
+    } catch {
+      /* ignore */
+    }
+  });
 
-window.addEventListener('unhandledrejection', (e: PromiseRejectionEvent) => {
-  if (!IS_DEV) return;
-  try {
-    flushRepeat();
-    const reason: unknown = e.reason;
-    post({
-      level: 'error',
-      message: truncate(`Unhandled promise rejection: ${formatArg(reason)}`),
-      timestamp: Date.now(),
-      stack: reason instanceof Error ? truncateStack(reason.stack) : undefined,
-    });
-  } catch {
-    /* ignore */
-  }
-});
+  window.addEventListener('unhandledrejection', (e: PromiseRejectionEvent) => {
+    if (!IS_DEV) return;
+    try {
+      flushRepeat();
+      const reason: unknown = e.reason;
+      post({
+        level: 'error',
+        message: truncate(`Unhandled promise rejection: ${formatArg(reason)}`),
+        timestamp: Date.now(),
+        stack: reason instanceof Error ? truncateStack(reason.stack) : undefined,
+      });
+    } catch {
+      /* ignore */
+    }
+  });
+}

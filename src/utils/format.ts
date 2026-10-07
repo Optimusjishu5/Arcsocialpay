@@ -242,7 +242,7 @@ export function validateSend(input: ValidateSendInput): ValidateSendResult {
   const usdcAddress = (input.usdcAddress ?? '').trim()
 
   if (!recipient || !isAddress(recipient)) {
-    return { ok: false, error: 'Enter a valid Ethereum address (0x...)' }
+    return { ok: false, error: 'Enter a valid Arc address (0x...)' }
   }
   if (recipient.toLowerCase() === ZERO_ADDRESS.toLowerCase()) {
     return { ok: false, error: 'Cannot send to zero address' }

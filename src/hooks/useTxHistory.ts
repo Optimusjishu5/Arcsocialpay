@@ -21,11 +21,10 @@
 //     be applied by the owning agent.
 //
 // Hardcoded literals owned elsewhere (NOT fixed here to avoid conflicts):
-//   - MessagesView PaymentBubble: `https://explorer.testnet.arc.io/tx/...`
-//     → use buildTxExplorerUrl(ARC_CHAIN_ID, txHash)
-//   - PostCard TipModal: `const ARC_TESTNET_CHAIN_ID = 5042002`
-//     → use ARC_CHAIN_ID from useArcWallet.ts
-//   - WalletView: `const CHAIN_ID = 5042002` → use ARC_CHAIN_ID
+//   - MessagesView PaymentBubble: uses buildTxExplorerUrl(ARC_CHAIN_ID, txHash)
+//     (Arc Mainnet explorer https://explorer.arc.io)
+//   - PostCard TipModal: uses ARC_CHAIN_ID from @/chains (5042, Arc Mainnet)
+//   - WalletView: uses ARC_CHAIN_ID (5042)
 // Owned files (Dashboard, ProfileView) already use ARC_CHAIN_ID + builders.
 
 import { useEffect } from 'react'

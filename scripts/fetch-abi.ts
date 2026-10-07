@@ -1,5 +1,5 @@
 /**
- * fetch-abi <address> [--network arc-testnet] — resolve a deployed contract's
+ * fetch-abi <address> [--network arc] — resolve a deployed contract's
  * ABI from a Blockscout (Arcscan) explorer and write src/contracts/<Name>.json.
  * The full ABI stays in the file; stdout gets a compact summary only, to keep
  * it out of the agent's context. Runs in-sandbox under bun.
@@ -19,16 +19,25 @@ export interface NetworkConfig {
 }
 
 export const NETWORKS: Record<string, NetworkConfig> = {
+  arc: {
+    chainId: 5042,
+    rpc: 'https://rpc.mainnet.arc.io',
+    explorerApiBase: 'https://explorer.arc.io/api',
+    explorerUrl: 'https://explorer.arc.io',
+    label: 'Arc',
+  },
+  // Legacy alias — kept so old `--network arc-testnet` invocations keep working
+  // but resolve to Arc Mainnet.
   'arc-testnet': {
-    chainId: 5042002,
-    rpc: 'https://rpc.testnet.arc.io',
-    explorerApiBase: 'https://explorer.testnet.arc.io/api',
-    explorerUrl: 'https://explorer.testnet.arc.io',
-    label: 'Arc Testnet',
+    chainId: 5042,
+    rpc: 'https://rpc.mainnet.arc.io',
+    explorerApiBase: 'https://explorer.arc.io/api',
+    explorerUrl: 'https://explorer.arc.io',
+    label: 'Arc',
   },
 };
 
-export const DEFAULT_NETWORK = 'arc-testnet';
+export const DEFAULT_NETWORK = 'arc';
 
 const PER_FETCH_TIMEOUT_MS = 3_000;
 const TOTAL_TIMEOUT_MS = 10_000;
@@ -376,7 +385,7 @@ async function main(): Promise<void> {
 
   if (!net) {
     throw new Error(
-      `Unknown network "${options.network}". Supported: ${Object.keys(NETWORKS).join(', ')} (v0 is Arc Testnet only).`,
+      `Unknown network "${options.network}". Supported: ${Object.keys(NETWORKS).join(', ')} (Arc Mainnet).`,
     );
   }
 
@@ -422,7 +431,7 @@ async function main(): Promise<void> {
 
   if (!hasContractCode(code)) {
     throw new Error(
-      `No contract found at ${address} on ${net.label}. v0 supports Arc Testnet only — double-check the address and network.`,
+      `No contract found at ${address} on ${net.label}. Double-check the address and network (Arc Mainnet, chainId 5042).`,
     );
   }
 

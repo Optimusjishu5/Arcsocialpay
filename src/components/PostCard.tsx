@@ -517,7 +517,7 @@ function TipModal({ postId, authorId, onClose }: { postId: string; authorId: str
             <div className="mb-4">
               {isWrongChain && (
                 <div className="mb-3 p-3 rounded-xl text-xs" style={{ background: 'rgba(186,43,76,0.1)', color: 'var(--danger)' }}>
-                  Wrong network. You need to switch to Arc Testnet first — your tip amount is preserved.
+                  Wrong network. You need to switch to Arc Mainnet first — your tip amount is preserved.
                 </div>
               )}
               {isFailed && (

@@ -20,10 +20,13 @@ base_sepolia = "https://base-sepolia-rpc.publicnode.com"
 arbitrum = "https://arbitrum-one-rpc.publicnode.com"
 polygon = "https://polygon-bor-rpc.publicnode.com"
 optimism = "https://optimism-rpc.publicnode.com"
-arc_testnet = "https://rpc.testnet.arc.io"
-arc = "https://rpc.arc.network"
+arc = "https://rpc.mainnet.arc.io"
+arc_mainnet = "https://rpc.mainnet.arc.io"
+# Legacy alias — points at Arc Mainnet (Chain ID 5042). Testnet is retired.
+arc_testnet = "https://rpc.mainnet.arc.io"
 
 # Verifier placeholder: set ARCSCAN_API_KEY in .env (see .env.example). URL is a placeholder until ArcScan publishes one.
 [etherscan]
-arc_testnet = { key = "${ARCSCAN_API_KEY}", url = "https://api.arcscan.app/api" }
 arc = { key = "${ARCSCAN_API_KEY}", url = "https://api.arcscan.app/api" }
+arc_mainnet = { key = "${ARCSCAN_API_KEY}", url = "https://api.arcscan.app/api" }
+arc_testnet = { key = "${ARCSCAN_API_KEY}", url = "https://api.arcscan.app/api" }

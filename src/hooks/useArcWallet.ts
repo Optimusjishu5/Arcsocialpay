@@ -6,11 +6,11 @@
 import { useState } from 'react'
 import { useAccount, useReadContract, useWriteContract, useWaitForTransactionReceipt, useSwitchChain } from 'wagmi'
 import { erc20Abi, isAddress } from 'viem'
-import { arcTestnet } from 'viem/chains'
+import { ARC_CHAIN_ID } from '@/chains'
 import { getUsdc, buildTxExplorerUrl } from '@/onchain-facts'
 import { Amount, usdcDecimalsFor, parseAmount } from '@/onchain-money'
 
-export const ARC_CHAIN_ID = arcTestnet.id // 5042002
+export { ARC_CHAIN_ID }
 const USDC_FACT = getUsdc(ARC_CHAIN_ID)!
 export const USDC_ADDRESS = USDC_FACT.address as `0x${string}`
 export const USDC_DECIMALS = USDC_FACT.decimals
@@ -93,11 +93,11 @@ export function useSendUsdc() {
         const msg = e instanceof Error ? e.message : 'Failed to switch network'
         return { ok: false, error: msg, switched: true }
       }
-      return { ok: false, error: 'Switching to Arc Testnet...', switched: true }
+      return { ok: false, error: 'Switching to Arc...', switched: true }
     }
     const to = (recipient ?? '').trim() as `0x${string}`
     if (!isAddress(to)) {
-      const msg = 'Enter a valid Ethereum address (0x...)'
+      const msg = 'Enter a valid Arc address (0x...)'
       setSendError(msg)
       return { ok: false, error: msg }
     }

@@ -148,7 +148,7 @@ export function Dashboard({ onNavigate }: Props) {
           <div className="mb-4 p-3 rounded-xl flex items-center gap-3"
             style={{ background: 'rgba(186,43,76,0.25)', border: '1px solid rgba(186,43,76,0.4)' }}>
             <span className="text-xs font-medium" style={{ color: '#ffc4ce' }}>
-              You are not on Arc Testnet. Switch network to send USDC.
+              You are not on Arc. Switch network to send USDC.
             </span>
             <Button size="sm" onClick={switchToArc} loading={isSwitching}
               className="ml-auto flex-shrink-0 !bg-white !text-[var(--danger)] text-xs">

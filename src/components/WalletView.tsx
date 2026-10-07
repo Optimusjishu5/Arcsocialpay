@@ -115,7 +115,7 @@ export default function WalletView() {
                 </span>
               )}
             </div>
-            <p className="text-sm opacity-70 mb-4" style={{ color: '#fff' }}>Arc Testnet · USDC</p>
+            <p className="text-sm opacity-70 mb-4" style={{ color: '#fff' }}>Arc Mainnet · USDC</p>
 
             {/* Address */}
             <button
@@ -199,7 +199,7 @@ export default function WalletView() {
             </div>
             <div className="flex-1 min-w-0">
               <p className="font-semibold text-sm" style={{ color: 'var(--ink)' }}>USD Coin</p>
-              <p className="text-xs" style={{ color: 'var(--subtle)' }}>USDC · Arc Testnet</p>
+              <p className="text-xs" style={{ color: 'var(--subtle)' }}>USDC · Arc</p>
             </div>
             <div className="text-right">
               <p className="font-semibold text-sm tabular" style={{ color: 'var(--ink)' }}>
@@ -211,7 +211,7 @@ export default function WalletView() {
             </div>
           </div>
           <p className="text-xs text-center py-3" style={{ color: 'var(--subtle)' }}>
-            On Arc Testnet, USDC is the native gas token.
+            On Arc, USDC is the native gas token.
           </p>
         </div>
       )}
@@ -366,7 +366,7 @@ function SendModal({
     setLocalError('')
     // M3: explicit switch first — preserve recipient/amount, don't silently drop.
     if (isWrongChain) {
-      toast.message('Switching to Arc Testnet — your details are preserved.')
+      toast.message('Switching to Arc Mainnet — your details are preserved.')
       switchChain({ chainId: CHAIN_ID })
       return
     }
@@ -422,7 +422,7 @@ function SendModal({
         onClick={e => e.stopPropagation()}
       >
         <h3 className="display font-bold text-lg mb-1" style={{ color: 'var(--ink)' }}>Send USDC</h3>
-        <p className="text-sm mb-5" style={{ color: 'var(--subtle)' }}>Arc Testnet · Balance: ${balance}</p>
+        <p className="text-sm mb-5" style={{ color: 'var(--subtle)' }}>Arc Mainnet · Balance: ${balance}</p>
 
         {isConfirmed ? (
           <div className="text-center py-4">
@@ -485,7 +485,7 @@ function SendModal({
           <>
             {isWrongChain && (
               <div className="mb-4 p-3 rounded-xl text-sm" style={{ background: 'rgba(186,43,76,0.1)', color: 'var(--danger)' }}>
-                Wrong network. Switch to Arc Testnet first — your recipient and amount are preserved.
+                Wrong network. Switch to Arc Mainnet first — your recipient and amount are preserved.
               </div>
             )}
             <div className="space-y-3 mb-4">
@@ -608,7 +608,7 @@ function ReceiveModal({ address, onClose }: { address: string; onClose: () => vo
         onClick={e => e.stopPropagation()}
       >
         <h3 className="display font-bold text-lg mb-1" style={{ color: 'var(--ink)' }}>Receive USDC</h3>
-        <p className="text-sm mb-5" style={{ color: 'var(--subtle)' }}>Send USDC to your Arc Testnet address</p>
+        <p className="text-sm mb-5" style={{ color: 'var(--subtle)' }}>Send USDC to your Arc address</p>
 
         {/* QR placeholder */}
         <div
@@ -649,7 +649,7 @@ function ReceiveModal({ address, onClose }: { address: string; onClose: () => vo
         </div>
 
         <p className="text-xs mb-4" style={{ color: 'var(--subtle)' }}>
-          Only send USDC on Arc Testnet to this address. Other assets may be lost.
+          Only send USDC on Arc to this address. Other assets may be lost.
         </p>
 
         <button

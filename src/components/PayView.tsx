@@ -6,6 +6,7 @@ import { isAddress } from 'viem'
 import { useWaitForTransactionReceipt } from 'wagmi'
 import { toast } from 'sonner'
 import { useArcAccount, useUsdcBalance, useSendUsdc, ARC_CHAIN_ID, USDC_ADDRESS } from '../hooks/useArcWallet'
+import { useSocialPay } from '../hooks/useSocialPay'
 import { appStore, useAppStore } from '../store/appStore'
 import { Button } from './ui/Button'
 import { TxStatusBadge, TxSpinner } from './ui/TxStatusBadge'
@@ -86,7 +87,7 @@ export function PayView({ initialMode = 'send', initialRecipient, onNavigate: _o
           style={{ background: 'var(--danger-bg)', border: '1px solid var(--danger)' }}>
           <AlertCircle size={16} style={{ color: 'var(--danger)', flexShrink: 0 }} />
           <span className="text-sm flex-1" style={{ color: 'var(--danger)' }}>
-            Switch to Arc Testnet to send USDC
+            Switch to Arc Mainnet to send USDC
           </span>
           <Button size="sm" variant="danger" onClick={switchToArc} loading={isSwitching}>
             Switch
@@ -205,18 +206,27 @@ function SendForm({
     send, hash, isPending, isConfirming, isSuccess, isError, error, explorerUrl, isWrongChain, reset,
   } = useSendUsdc()
 
+  // ArcSocialPay contract path — active once NEXT_PUBLIC_SOCIAL_PAY_ADDRESS
+  // is set (post Remix deployment). Direct transfers stay the fallback.
+  const sp = useSocialPay()
+  const useContract = sp.isConfigured
+  const activeHash = useContract ? sp.actionHash : hash
+
   // Independent receipt read: useSendUsdc.isSuccess only means "receipt fetched",
   // not "receipt succeeded". We gate confirmed on data.status === 'success'.
+  // Direct-path only; the contract path reads sp.actionReceipt instead.
   const { data: receipt, isError: isReceiptError } = useWaitForTransactionReceipt({ hash })
+  const activeReceipt = useContract ? sp.actionReceipt : receipt
+  const activeExplorerUrl = useContract ? sp.explorerUrl : explorerUrl
 
   // H1: record pending as soon as we have a hash.
   useEffect(() => {
-    if (hash && !pendingRecordedRef.current.has(hash)) {
-      pendingRecordedRef.current.add(hash)
+    if (activeHash && !pendingRecordedRef.current.has(activeHash)) {
+      pendingRecordedRef.current.add(activeHash)
       const snap = sendSnapshotRef.current ?? { recipient, amount, note, fromAddress: myAddress }
       try {
         appStore.addTxRecord({
-          txHash: hash,
+          txHash: activeHash,
           chainId: ARC_CHAIN_ID,
           direction: 'sent',
           amount: snap.amount,
@@ -231,31 +241,31 @@ function SendForm({
       }
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [hash])
+  }, [activeHash])
 
   // H1: only mark confirmed when receipt.status === 'success'; mark failed otherwise.
   useEffect(() => {
-    if (!hash) return
-    if (receipt?.status === 'success') {
-      appStore.updateTxRecord(hash, { status: 'confirmed' })
+    if (!activeHash) return
+    if (activeReceipt?.status === 'success') {
+      appStore.updateTxRecord(activeHash, { status: 'confirmed' })
       onSuccess()
       setReceiptFailed(false)
       setTimeout(() => setStage('done'), 0)
-    } else if (receipt?.status === 'reverted' || (isSuccess && receipt && receipt.status !== 'success')) {
-      appStore.updateTxRecord(hash, { status: 'failed' })
+    } else if (activeReceipt?.status === 'reverted' || (!useContract && (isSuccess && receipt && receipt.status !== 'success'))) {
+      appStore.updateTxRecord(activeHash, { status: 'failed' })
       setReceiptFailed(true)
-    } else if (isReceiptError && hash) {
-      appStore.updateTxRecord(hash, { status: 'failed' })
+    } else if (!useContract && isReceiptError && activeHash) {
+      appStore.updateTxRecord(activeHash, { status: 'failed' })
       setReceiptFailed(true)
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [receipt, isSuccess, isReceiptError, hash])
+  }, [activeReceipt, activeHash, useContract, receipt, isSuccess, isReceiptError])
 
   function validateAndPreview() {
     setLocalError('')
     setReceiptFailed(false)
     if (!isAddress(recipient)) {
-      setLocalError('Enter a valid Ethereum address (0x...)')
+      setLocalError('Enter a valid Arc address (0x...)')
       return
     }
     const blocked = isBlockedRecipient(recipient, myAddress)
@@ -288,7 +298,7 @@ function SendForm({
 
   function handleSend() {
     // M4: guard against double-submit.
-    if (isPending || isConfirming) return
+    if (isPending || isConfirming || sp.isBusy) return
     setLocalError('')
     const trimmed = amount.trim()
     if (!trimmed || !AMOUNT_REGEX.test(trimmed)) {
@@ -300,9 +310,20 @@ function SendForm({
       setLocalError(blocked)
       return
     }
+    // Contract path: approve (if needed) then ArcSocialPay.pay(recipient, raw, note).
+    // Receipt gating + tx records reuse the shared activeHash/activeReceipt effects above.
+    if (useContract) {
+      sendSnapshotRef.current = { recipient, amount: trimmed, note, fromAddress: myAddress }
+      try {
+        void sp.requestPay(recipient, trimmed, note)
+      } catch (e) {
+        setLocalError(parseOnchainError(e))
+      }
+      return
+    }
     if (isWrongChain) {
-      setLocalError('Please switch to Arc Testnet first — your details are preserved.')
-      toast.error('Switch to Arc Testnet first, then confirm again.')
+      setLocalError('Please switch to Arc Mainnet first — your details are preserved.')
+      toast.error('Switch to Arc Mainnet first, then confirm again.')
       return
     }
     sendSnapshotRef.current = { recipient, amount: trimmed, note, fromAddress: myAddress }
@@ -315,7 +336,7 @@ function SendForm({
 
   function handleSwitchChain() {
     // M3: explicit switch that preserves form state (no send, no reset).
-    toast.message('Switching to Arc Testnet — your payment details are kept.')
+    toast.message('Switching to Arc Mainnet — your payment details are kept.')
     switchToArc()
   }
 
@@ -329,6 +350,7 @@ function SendForm({
     sendSnapshotRef.current = null
     setStage('form')
     reset()
+    sp.reset()
   }
 
   if (stage === 'done') {
@@ -346,8 +368,8 @@ function SendForm({
         <p className="text-sm mb-4" style={{ color: 'var(--muted)' }}>
           {amount} USDC sent to {formatAddress(recipient)}
         </p>
-        {explorerUrl && (
-          <a href={explorerUrl} target="_blank" rel="noopener noreferrer"
+        {activeExplorerUrl && (
+          <a href={activeExplorerUrl} target="_blank" rel="noopener noreferrer"
             className="inline-flex items-center gap-1.5 text-sm font-medium mb-6"
             style={{ color: 'var(--accent)' }}>
             <ExternalLink size={14} />
@@ -360,12 +382,22 @@ function SendForm({
   }
 
   if (stage === 'preview') {
-    const isProcessing = isPending || isConfirming
+    const isProcessing = useContract ? sp.isBusy : (isPending || isConfirming)
     const baseErr = isError ? parseOnchainError(error) : ''
-    const receiptErr = receiptFailed || receipt?.status === 'reverted'
+    const contractErr = useContract && sp.error ? parseOnchainError(sp.error) : ''
+    const receiptErr = receiptFailed || activeReceipt?.status === 'reverted'
       ? 'Transaction failed onchain (reverted). Your payment was not sent.'
       : ''
-    const errMsg = localError || receiptErr || baseErr
+    const errMsg = localError || receiptErr || contractErr || baseErr
+    const busyText = useContract
+      ? sp.status === 'approving'
+        ? 'Approve in wallet...'
+        : sp.status === 'sending'
+          ? 'Confirm in wallet...'
+          : 'Confirming on chain...'
+      : isPending
+        ? 'Confirm in wallet...'
+        : 'Confirming on chain...'
 
     return (
       <motion.div
@@ -394,11 +426,16 @@ function SendForm({
             </span>
           </PreviewRow>
           <PreviewRow label="Network">
-            <span className="text-sm" style={{ color: 'var(--ink-2)' }}>Arc Testnet</span>
+            <span className="text-sm" style={{ color: 'var(--ink-2)' }}>Arc Mainnet</span>
           </PreviewRow>
           <PreviewRow label="Gas">
             <span className="text-sm" style={{ color: 'var(--ink-2)' }}>Paid in USDC</span>
           </PreviewRow>
+          {useContract && (
+            <PreviewRow label="Route">
+              <span className="text-sm" style={{ color: 'var(--ink-2)' }}>ArcSocialPay contract</span>
+            </PreviewRow>
+          )}
           {note && <PreviewRow label="Note"><span className="text-sm" style={{ color: 'var(--ink-2)' }}>{note}</span></PreviewRow>}
 
           {errMsg && (
@@ -412,21 +449,21 @@ function SendForm({
             <div className="flex items-start gap-2 p-3 rounded-xl"
               style={{ background: 'var(--danger-bg)', color: 'var(--danger)' }}>
               <AlertCircle size={16} className="flex-shrink-0 mt-0.5" />
-              <span className="text-sm">Wrong network — switch to Arc Testnet first. Your recipient and amount are preserved.</span>
+              <span className="text-sm">Wrong network — switch to Arc Mainnet first. Your recipient and amount are preserved.</span>
             </div>
           )}
         </div>
         <div className="p-4 pt-0">
           {isProcessing ? (
             <div className="flex items-center justify-center h-12">
-              <TxSpinner text={isPending ? 'Confirm in wallet...' : 'Confirming on chain...'} />
+              <TxSpinner text={busyText} />
             </div>
           ) : isWrongChain ? (
             <Button className="w-full" onClick={handleSwitchChain} loading={isSwitching}>
-              Switch to Arc Testnet
+              Switch to Arc Mainnet
             </Button>
           ) : (
-            <Button className="w-full" onClick={handleSend} disabled={isPending || isConfirming}>
+            <Button className="w-full" onClick={handleSend} disabled={useContract ? sp.isBusy : (isPending || isConfirming)}>
               Confirm & Send
             </Button>
           )}

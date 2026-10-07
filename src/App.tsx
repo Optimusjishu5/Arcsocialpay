@@ -1,7 +1,10 @@
+'use client'
+
 import { useState, useEffect } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { isAddress } from 'viem'
 import { useArcAccount } from './hooks/useArcWallet'
+import { usePersistentChat } from './hooks/usePersistentChat'
 import { appStore, useTheme } from './store/appStore'
 import { Dashboard } from './components/Dashboard'
 import { MessagesView } from './components/MessagesView'
@@ -29,23 +32,28 @@ interface NavState {
 export default function App() {
   const { theme } = useTheme()
   const { address } = useArcAccount()
-  const [nav, setNav] = useState<NavState>(() => {
-    // Handle ?pay= query param for payment request links (M5).
-    // Validate with isAddress (checksummed, case-insensitive) before prefilling.
+  const [nav, setNav] = useState<NavState>({ view: 'home' })
+  const [payPrefillApplied, setPayPrefillApplied] = useState(false)
+
+  // Handle ?pay= query param for payment request links (client-only, SSR-safe).
+  // Validate with isAddress (checksummed, case-insensitive) before prefilling.
+  useEffect(() => {
+    if (payPrefillApplied || typeof window === 'undefined') return
     try {
       const params = new URLSearchParams(window.location.search)
       const payTo = (params.get('pay') ?? '').trim()
       if (payTo && isAddress(payTo)) {
-        return { view: 'pay', extra: { mode: 'send', recipient: payTo } }
+        setNav({ view: 'pay', extra: { mode: 'send', recipient: payTo } })
       }
     } catch {
       // ignore malformed URLs — fall through to home
     }
-    return { view: 'home' }
-  })
+    setPayPrefillApplied(true)
+  }, [payPrefillApplied])
 
   // Apply theme class to <html>
   useEffect(() => {
+    if (typeof document === 'undefined') return
     const html = document.documentElement
     if (theme === 'dark') {
       html.classList.add('dark')
@@ -61,10 +69,16 @@ export default function App() {
     }
   }, [address])
 
+  // Persistent chat: hydrate from Turso + write-through when configured.
+  // No-op (localStorage only) when TURSO_* env vars are missing.
+  usePersistentChat(address)
+
   function navigate(view: NavView, extra?: Record<string, string>) {
     setNav({ view, extra })
     // Scroll to top on navigation
-    window.scrollTo({ top: 0, behavior: 'smooth' })
+    if (typeof window !== 'undefined') {
+      window.scrollTo({ top: 0, behavior: 'smooth' })
+    }
   }
 
   function renderView() {

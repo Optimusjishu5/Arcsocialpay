@@ -27,7 +27,7 @@ import {Create2Factory} from "./Create2Factory.sol";
 ///                         with `cast abi-encode` + `forge inspect Target bytecode`, or inline it in a
 ///                         thin wrapper script that constructs `abi.encodePacked(type(Target).creationCode, abi.encode(...))`)
 ///   DEPLOY_VALUE        - optional wei amount to forward to the target's constructor (default 0)
-///   EXPECTED_CHAIN_ID   - optional chain-id guard (default 5042002, Arc Testnet).
+///   EXPECTED_CHAIN_ID   - optional chain-id guard (default 5042, Arc Mainnet).
 ///                         Set to your local chain id (e.g. 31337) for rehearsal runs.
 ///
 /// `CREATE2_SALT` is read via `vm.envBytes32` directly. If you'd rather derive the salt from a
@@ -36,15 +36,15 @@ import {Create2Factory} from "./Create2Factory.sol";
 /// direct bytes32 env var because it avoids an extra hashing step for callers that already have
 /// a well-formed salt.
 contract DeployCreate2 is Script {
-    /// @notice Arc Testnet chain id. Override per-run via the EXPECTED_CHAIN_ID env var.
-    uint256 internal constant ARC_TESTNET_CHAIN_ID = 5042002;
+    /// @notice Arc Mainnet chain id. Override per-run via the EXPECTED_CHAIN_ID env var.
+    uint256 internal constant ARC_MAINNET_CHAIN_ID = 5042;
 
     function run() external returns (address deployedAddress) {
         address factory = vm.envAddress("FACTORY_ADDRESS");
         bytes32 userSalt = vm.envBytes32("CREATE2_SALT");
         bytes memory creationCode = vm.envBytes("CREATION_CODE");
         uint256 deployValue = vm.envOr("DEPLOY_VALUE", uint256(0));
-        uint256 expectedChainId = vm.envOr("EXPECTED_CHAIN_ID", ARC_TESTNET_CHAIN_ID);
+        uint256 expectedChainId = vm.envOr("EXPECTED_CHAIN_ID", ARC_MAINNET_CHAIN_ID);
         require(block.chainid == expectedChainId, "DeployCreate2: unexpected chain id");
 
         // The factory namespaces salts to msg.sender, i.e. the account broadcasting this script.

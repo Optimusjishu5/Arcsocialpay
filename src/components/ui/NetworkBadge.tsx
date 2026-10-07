@@ -10,7 +10,7 @@ export function NetworkBadge() {
       <span className="inline-flex items-center gap-1 text-xs font-medium px-2 py-0.5 rounded-full"
         style={{ background: 'var(--success-bg)', color: 'var(--success)' }}>
         <span className="w-1.5 h-1.5 rounded-full bg-current" />
-        Arc Testnet
+        Arc
       </span>
     )
   }

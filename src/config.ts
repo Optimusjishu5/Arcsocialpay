@@ -1,32 +1,28 @@
 /**
- * wagmi configuration
+ * wagmi configuration — Arc Mainnet only.
  * Built with Arc Studio — https://studio.arc.io
  */
 
 import { http, createConfig } from 'wagmi'
-import { mainnet } from 'wagmi/chains'
-import { arcTestnet } from 'viem/chains'
 import { injected } from 'wagmi/connectors'
+import { arcMainnet, ARC_CHAIN_ID, ARC_RPC_URL } from './chains'
 import { registerChain } from './tracing'
-import { VITE_ARC_TESTNET_RPC } from './env'
+import { NEXT_PUBLIC_ARC_RPC } from './env'
 
-// Env-driven RPC: VITE_ARC_TESTNET_RPC override falls back to viem's chain default.
-// src/env.ts already validated https://; re-check here in case the default ever changes.
-const defaultArcRpc = arcTestnet.rpcUrls.default.http[0]
-const arcRpc = VITE_ARC_TESTNET_RPC ?? defaultArcRpc
+// Env-driven RPC: NEXT_PUBLIC_ARC_RPC override falls back to Arc Mainnet default.
+const arcRpc = NEXT_PUBLIC_ARC_RPC ?? ARC_RPC_URL
 if (!arcRpc.startsWith('https://')) {
-  throw new Error(`[config] Arc Testnet RPC must use https://, got "${arcRpc}"`)
+  throw new Error(`[config] Arc Mainnet RPC must use https://, got "${arcRpc}"`)
 }
 
 // Pre-register chain RPC URLs so trace events show correct chain names immediately
-registerChain(arcTestnet.id, arcRpc)
+registerChain(ARC_CHAIN_ID, arcRpc)
 
 export const config = createConfig({
-  // mainnet is kept only for ENS resolution; all app transactions are on Arc Testnet.
-  chains: [arcTestnet, mainnet], // mainnet needed for ENS resolution
+  // Arc Mainnet only — all app transactions are on Arc (Chain ID 5042).
+  chains: [arcMainnet],
   connectors: [injected()],
   transports: {
-    [arcTestnet.id]: http(arcRpc, { batch: true, retryCount: 2, timeout: 10_000 }),
-    [mainnet.id]: http(), // ENS resolution uses mainnet
+    [arcMainnet.id]: http(arcRpc, { batch: true, retryCount: 2, timeout: 10_000 }),
   },
 })

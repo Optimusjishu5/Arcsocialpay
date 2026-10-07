@@ -3,12 +3,12 @@ import "@nomicfoundation/hardhat-ethers";
 import "@nomicfoundation/hardhat-chai-matchers";
 import * as dotenv from "dotenv";
 
-// Loads .env for ARC_TESTNET_RPC / DEPLOYER_PRIVATE_KEY. Missing file is fine
+// Loads .env for ARC_MAINNET_RPC / DEPLOYER_PRIVATE_KEY. Missing file is fine
 // (local hardhat network needs neither).
 dotenv.config();
 
-const ARC_TESTNET_CHAIN_ID = 5042002;
-const ARC_TESTNET_RPC = process.env.ARC_TESTNET_RPC || "https://rpc.testnet.arc.io";
+const ARC_MAINNET_CHAIN_ID = 5042;
+const ARC_MAINNET_RPC = process.env.ARC_MAINNET_RPC || process.env.ARC_TESTNET_RPC || "https://rpc.mainnet.arc.io";
 const DEPLOYER_PRIVATE_KEY = process.env.DEPLOYER_PRIVATE_KEY;
 const deployerAccounts: string[] =
   DEPLOYER_PRIVATE_KEY && DEPLOYER_PRIVATE_KEY.length > 0 ? [DEPLOYER_PRIVATE_KEY] : [];
@@ -40,9 +40,16 @@ const config: HardhatUserConfig = {
     localhost: {
       url: "http://127.0.0.1:8545",
     },
+    arc: {
+      url: ARC_MAINNET_RPC,
+      chainId: ARC_MAINNET_CHAIN_ID,
+      accounts: deployerAccounts,
+    },
+    // Legacy alias — `arcTestnet` now points at Arc Mainnet so old
+    // `--network arcTestnet` invocations keep working without a testnet.
     arcTestnet: {
-      url: ARC_TESTNET_RPC,
-      chainId: ARC_TESTNET_CHAIN_ID,
+      url: ARC_MAINNET_RPC,
+      chainId: ARC_MAINNET_CHAIN_ID,
       accounts: deployerAccounts,
     },
   },

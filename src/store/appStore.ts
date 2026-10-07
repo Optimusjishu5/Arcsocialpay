@@ -1,6 +1,9 @@
-// ── Application state store (in-memory + localStorage persistence) ──────────
+// ── Application state store (in-memory + localStorage + Turso sync) ───────
 // Messaging, social, groups, profiles, and notifications are off-chain app
-// data stored locally. All financial transactions go through the real blockchain.
+// data. Local store is the realtime source of truth; chat conversations and
+// messages additionally persist to Turso (LibSQL) via app/api/* when
+// TURSO_DATABASE_URL + TURSO_AUTH_TOKEN are set (see usePersistentChat).
+// All financial transactions go through the real blockchain (Arc Mainnet).
 
 import { useState, useEffect, useCallback } from 'react'
 import { toast } from 'sonner'
@@ -873,6 +876,54 @@ export const appStore = {
       ...s,
       notifications: s.notifications.map((n) => ({ ...n, read: true })),
     }))
+  },
+
+  // ── Turso import (Next.js persistent chat) ─────────────────────────────
+  // Upserts from server so a fresh device/browser hydrates the same chat
+  // history. Local writes remain the source of truth for realtime UX;
+  // usePersistentChat() calls these after fetching /api/*.
+  importConversations(convs: Conversation[]) {
+    if (!Array.isArray(convs) || convs.length === 0) return
+    setState((s) => {
+      const byId = new Map(s.conversations.map((c) => [c.id, c]))
+      for (const c of convs) {
+        if (!c || typeof c.id !== 'string') continue
+        byId.set(c.id, {
+          ...c,
+          participants: Array.isArray(c.participants) ? c.participants : [],
+          unreadCount: typeof c.unreadCount === 'number' ? c.unreadCount : 0,
+          createdAt: typeof c.createdAt === 'number' ? c.createdAt : Date.now(),
+          isGroup: !!c.isGroup,
+        })
+      }
+      return { ...s, conversations: [...byId.values()] }
+    })
+  },
+
+  importMessages(conversationId: string, list: Message[]) {
+    if (!conversationId || !Array.isArray(list) || list.length === 0) return
+    setState((s) => {
+      const existing = s.messages[conversationId] ?? []
+      const byId = new Map(existing.map((m) => [m.id, m]))
+      for (const m of list) {
+        if (!m || typeof m.id !== 'string') continue
+        byId.set(m.id, {
+          ...m,
+          conversationId,
+          createdAt: typeof m.createdAt === 'number' ? m.createdAt : Date.now(),
+          status: m.status ?? 'sent',
+        })
+      }
+      const merged = [...byId.values()].sort((a, b) => a.createdAt - b.createdAt)
+      const last = merged[merged.length - 1]
+      return {
+        ...s,
+        messages: { ...s.messages, [conversationId]: merged },
+        conversations: last
+          ? s.conversations.map((c) => (c.id === conversationId ? { ...c, lastMessage: last } : c))
+          : s.conversations,
+      }
+    })
   },
 }
 
