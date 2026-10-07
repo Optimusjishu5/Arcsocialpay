@@ -262,7 +262,7 @@ export const appStore = {
       ...s,
       profiles: {
         ...s.profiles,
-        [key]: { ...(s.profiles[key] as UserProfile | undefined), ...profile, address: key },
+        [key]: { ...(s.profiles[key] as UserProfile | undefined), ...profile, address: key } as UserProfile,
       },
     }))
     return true

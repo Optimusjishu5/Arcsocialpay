@@ -101,8 +101,7 @@ export function GroupsView() {
               onBack={() => setActiveGroupId(null)}
             />
           )
-        })()
-        ) : (
+        })() : (
           <div className="hidden md:flex flex-1 flex-col items-center justify-center gap-3" style={{ background: 'var(--bg)' }}>
             <div className="w-16 h-16 rounded-2xl flex items-center justify-center"
               style={{ background: 'var(--surface-muted)', color: 'var(--muted)' }}>
