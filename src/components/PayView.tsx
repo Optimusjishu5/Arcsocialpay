@@ -1,29 +1,27 @@
 import { useState, useEffect, useRef } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { Send as SendIcon, Layers, HandCoins, Users, CalendarClock, ArrowLeftRight, Waypoints, ArrowUpRight, ArrowDownLeft, Copy, Check, ExternalLink, QrCode, AlertCircle, X, RefreshCw } from 'lucide-react'
+import { Send as SendIcon, Layers, HandCoins, Users, CalendarClock, ArrowLeftRight, Waypoints, ArrowDownLeft, Copy, Check, ExternalLink, QrCode, AlertCircle, X } from 'lucide-react'
 import { ConnectKitButton } from 'connectkit'
 import { isAddress } from 'viem'
 import { useWaitForTransactionReceipt } from 'wagmi'
 import { toast } from 'sonner'
 import { useArcAccount, useUsdcBalance, useSendUsdc, ARC_CHAIN_ID, USDC_ADDRESS } from '../hooks/useArcWallet'
 import { useSocialPay } from '../hooks/useSocialPay'
-import { appStore, useAppStore } from '../store/appStore'
+import { appStore } from '../store/appStore'
 import { Button } from './ui/Button'
-import { TxStatusBadge, TxSpinner } from './ui/TxStatusBadge'
+import { TxSpinner } from './ui/TxStatusBadge'
 import { Avatar } from './ui/Avatar'
-import { formatAddress, formatTimestamp, parseOnchainError, ZERO_ADDRESS, AMOUNT_REGEX, isSameAddress, maxSendableRaw, formatUsdcDisplay } from '../utils/format'
+import { formatAddress, parseOnchainError, ZERO_ADDRESS, AMOUNT_REGEX, maxSendableRaw, formatUsdcDisplay } from '../utils/format'
 import { copyText } from '../utils/copy'
 import { ShareLinkBox } from './pay/ShareLinkBox'
 import { GradientIcon, toneVars, type Tone } from './dashboard/ui'
-import { describeTx, txUrl } from '../utils/txPresentation'
-import { useOnchainStatus } from '../hooks/useOnchainActivity'
 import { buildRequestPath } from '../utils/payRequests'
 import { useScheduledPayments } from '../hooks/useScheduledPayments'
 import { BatchForm } from './pay/BatchForm'
+import { PayHistory } from './pay/PayHistory'
 import { RequestForm } from './pay/RequestForm'
 import { SplitBillForm } from './pay/SplitBillForm'
 import { ScheduleForm } from './pay/ScheduleForm'
-import { buildTxExplorerUrl } from '@/onchain-facts'
 import type { NavView } from '../types/index'
 
 // Keep 0.1 USDC back so the user can still pay gas (USDC is the gas token on Arc).
@@ -100,8 +98,6 @@ export function PayView({ initialMode = 'send', initialRecipient, initialAmount,
   const { address, isConnected, isArcChain, switchToArc, isSwitching } = useArcAccount()
   const scheduled = useScheduledPayments(address)
   const { display: balanceDisplay, raw: balanceRaw, refetch } = useUsdcBalance(address)
-  const { txHistory } = useAppStore()
-  const chain = useOnchainStatus()
 
   if (!isConnected) {
     return (
@@ -113,10 +109,6 @@ export function PayView({ initialMode = 'send', initialRecipient, initialAmount,
       </div>
     )
   }
-
-  const myTxs = txHistory.filter((t) =>
-    isSameAddress(t.fromAddress, address) || isSameAddress(t.toAddress, address)
-  )
 
   return (
     <div className="tone-scope flex flex-col gap-4 px-4 pt-4 pb-8 max-w-lg mx-auto" style={toneVars(MODE_STYLE[mode].tone)}>
@@ -226,60 +218,8 @@ export function PayView({ initialMode = 'send', initialRecipient, initialAmount,
         )}
       </AnimatePresence>
 
-      {/* Transaction History */}
-      <div className="rounded-2xl overflow-hidden" data-tc="">
-        <div className="px-4 py-3 flex items-center justify-between gap-2" style={{ borderBottom: '1px solid var(--border)' }}>
-          <h3 className="display font-semibold text-sm" style={{ color: 'var(--ink)' }}>History</h3>
-          <button
-            type="button"
-            onClick={chain.rescan}
-            disabled={chain.scanning}
-            className="inline-flex items-center gap-1.5 text-xs font-semibold disabled:opacity-60"
-            style={{ color: 'var(--tone-text)' }}
-          >
-            <RefreshCw size={12} className={chain.scanning ? 'animate-spin' : ''} />
-            {chain.scanning ? `Checking Arc ${Math.round(chain.progress * 100)}%` : 'Refresh from chain'}
-          </button>
-        </div>
-        {myTxs.length === 0 ? (
-          <p className="px-4 py-8 text-center text-sm" style={{ color: 'var(--muted)' }}>
-            {chain.scanning ? 'Looking for your payments, swaps and bridges...' : `No payments, swaps or bridges found in the last ${chain.daysCovered || 2} days. Open Activity to see older history load in the background.`}
-          </p>
-        ) : (
-          <div className="divide-y" style={{ borderColor: 'var(--border)' }}>
-            {myTxs.slice(0, 30).map((tx) => {
-              const v = describeTx(tx, address ?? '')
-              return (
-                <div key={tx.id} className="flex items-center gap-3 px-4 py-3">
-                  <GradientIcon icon={v.icon} tone={v.tone} size={36} />
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2 mb-0.5">
-                      <span className="text-sm font-medium" style={{ color: 'var(--ink)' }}>{v.title}</span>
-                      <TxStatusBadge status={tx.status} />
-                    </div>
-                    <p className="text-xs truncate" style={{ color: 'var(--muted)' }}>
-                      {v.detail} · {formatTimestamp(tx.timestamp)}
-                    </p>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    {v.amountText && (
-                      <span className="tabnum font-semibold text-sm" style={{ color: v.sign === '-' ? 'var(--danger)' : 'var(--success)' }}>
-                        {v.sign}{v.amountText}
-                      </span>
-                    )}
-                    <a href={txUrl(tx)} target="_blank" rel="noopener noreferrer"
-                      aria-label="View on explorer"
-                      className="p-1 rounded hover:bg-[var(--surface-muted)] transition-colors"
-                      style={{ color: 'var(--muted)' }}>
-                      <ExternalLink size={12} />
-                    </a>
-                  </div>
-                </div>
-              )
-            })}
-          </div>
-        )}
-      </div>
+      {/* Every transaction of this wallet, same data as the Dashboard and Activity */}
+      <PayHistory address={address!} />
     </div>
   )
 }

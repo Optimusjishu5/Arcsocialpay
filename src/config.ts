@@ -3,7 +3,7 @@
  * Built with Arc Studio — https://studio.arc.io
  */
 
-import { http, createConfig } from 'wagmi'
+import { http, fallback, createConfig } from 'wagmi'
 import { injected, coinbaseWallet, walletConnect } from 'wagmi/connectors'
 import { arcMainnet, ARC_CHAIN_ID, ARC_RPC_URL } from './chains'
 import { registerChain } from './tracing'
@@ -14,6 +14,14 @@ const arcRpc = NEXT_PUBLIC_ARC_RPC ?? ARC_RPC_URL
 if (!arcRpc.startsWith('https://')) {
   throw new Error(`[config] Arc Mainnet RPC must use https://, got "${arcRpc}"`)
 }
+
+// Other public Arc RPCs, tried in order only when the one above fails or is rate limited.
+// Balance and other reads therefore keep working instead of silently coming back empty.
+const BACKUP_RPCS = [
+  'https://rpc.blockdaemon.mainnet.arc.io',
+  'https://rpc.quicknode.mainnet.arc.io',
+  'https://rpc.drpc.mainnet.arc.io',
+].filter((u) => u !== arcRpc)
 
 // Pre-register chain RPC URLs so trace events show correct chain names immediately
 registerChain(ARC_CHAIN_ID, arcRpc)
@@ -31,6 +39,12 @@ export const config = createConfig({
       : []),
   ],
   transports: {
-    [arcMainnet.id]: http(arcRpc, { batch: true, retryCount: 2, timeout: 10_000 }),
+    [arcMainnet.id]: fallback(
+      [
+        http(arcRpc, { batch: true, retryCount: 1, timeout: 6_000 }),
+        ...BACKUP_RPCS.map((u) => http(u, { batch: true, retryCount: 0, timeout: 6_000 })),
+      ],
+      { retryCount: 1 },
+    ),
   },
 })

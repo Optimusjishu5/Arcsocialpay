@@ -23,7 +23,7 @@ Social messaging with native USDC payments on Arc Mainnet: chat + in-chat pay, s
 
 ## Live Deployments (Arc Mainnet, Chain ID 5042)
 
-- ArcSocialPay: 0x3b61FC789342B02Ae9DA3Bcece910AFaAd40bf54 ([explorer](https://explorer.arc.io/address/0x3b61FC789342B02Ae9DA3Bcece910AFaAd40bf54)) — source `contracts/ArcSocialPay.sol`, deployed via Remix. Frontend binds via `src/contracts/arcSocialPay.ts` + `src/hooks/useSocialPay.ts`, address from `NEXT_PUBLIC_SOCIAL_PAY_ADDRESS`. Empty = direct-USDC fallback.
+- ArcSocialPay: 0x3b61FC789342B02Ae9DA3Bcece910AFaAd40bf54 ([explorer](https://explorer.arc.io/address/0x3b61FC789342B02Ae9DA3Bcece910AFaAd40bf54)) — source `contracts/ArcSocialPay.sol`, deployed via Remix. Frontend binds via `src/contracts/arcSocialPay.ts` + `src/hooks/useSocialPay.ts`, address from `NEXT_PUBLIC_SOCIAL_PAY_ADDRESS`. Empty = direct-USDC fallback. In use: set in the sandbox `.env` (gitignored) to this address; checked on-chain: `usdc()` is Arc USDC, owner is the project wallet `0x180D...e487c61`, not paused, all app functions/events present. NEXT_PUBLIC values are baked in at build time, so rebuild after changing it.
 - Create2Factory: 0x375Fb60CA0ba2f3bfBfE95eb122ecF087bD1334d — infra for deterministic deploys, not used by the UI.
 
 ## Key Files
@@ -52,6 +52,8 @@ The sandbox preview runs the optimized build (`bunx next start -H 0.0.0.0 -p 517
 ## Recent changes
 
 - Activity tab: reads the wallet's full history from Arc in the background (paused/resumed from the Activity screen) and stores it permanently in the browser's IndexedDB together with scan progress (`src/lib/activityCache.ts`; bump `SCAN_VERSION` there to force a rescan). Search/filters/day groups/CSV export.
+  - The Dashboard "Recent activity", Pay "History" and Activity all read one list from `src/hooks/useWalletActivity.ts` (app list + permanent chain history, one entry per transaction hash). The sync progress card was removed from Activity on purpose; syncing still runs in the background.
+  - Live: a separate check runs every 2 s (`LIVE_MS` in `src/hooks/useOnchainActivity.ts`) and on tab focus, independent of the slow background backfill. Scanned records go through `appStore.syncChainRecords`, which adds unknown transactions and corrects pending/older copies to the exact chain details (confirmed, block time, block, amount) while keeping memos and summaries.
   - Arc logs ALL USDC movement (native sends, ERC-20 transfers, mints, burns) from the system emitter `0xffff...fffE` in 18 decimals; a plain native send emits no log from the ERC-20 contract. The scan reads USDC only from the system emitter (converted to 6 decimals) plus other tokens from their own contracts (`src/lib/onchainActivity.ts`).
   - RPCs: `rpc.mainnet.arc.io` accepts 8,000-block windows and about a 60-request burst then one request per ~2 s. `rpc.blockdaemon.mainnet.arc.io` accepts 100,000-block windows with no observed limit but keeps only ~2.5 days, so it serves the newest days; older blocks use the primary RPC. Each RPC has its own adaptive pace.
 - Pay > Batch: two-step flow (add recipients, then review and confirm). Components: `src/components/pay/BatchForm.tsx`, `BatchRowItem.tsx`, `BatchReview.tsx`.

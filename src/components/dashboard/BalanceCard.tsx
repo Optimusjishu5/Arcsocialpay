@@ -11,6 +11,10 @@ interface Props {
   address: string
   display: string
   loading: boolean
+  /** No balance could be read yet (show a placeholder, never a fake 0). */
+  unavailable?: boolean
+  /** Showing the last known balance while the live one loads. */
+  stale?: boolean
   copied: boolean
   isArcChain: boolean
   isSwitching: boolean
@@ -20,7 +24,7 @@ interface Props {
 }
 
 /** Debit-card style hero: live USDC balance, wallet address and network. */
-export function BalanceCard({ address, display, loading, copied, isArcChain, isSwitching, onCopy, onRefresh, onSwitch }: Props) {
+export function BalanceCard({ address, display, loading, unavailable = false, stale = false, copied, isArcChain, isSwitching, onCopy, onRefresh, onSwitch }: Props) {
   return (
     <motion.div
       initial={{ opacity: 0, y: 18, scale: 0.98 }}
@@ -67,7 +71,7 @@ export function BalanceCard({ address, display, loading, copied, isArcChain, isS
             <div className="h-11 w-44 rounded-xl animate-pulse" style={{ background: 'rgba(255,255,255,0.18)' }} />
           ) : (
             <span className="display font-bold tabnum" style={{ fontSize: '2.75rem', lineHeight: 1, letterSpacing: '-0.04em', textShadow: '0 2px 18px rgba(0,0,0,0.25)' }}>
-              {display}
+              {unavailable ? '--' : display}
             </span>
           )}
           <span className="inline-flex items-center gap-1.5 h-8 pl-1.5 pr-2.5 rounded-full text-sm font-semibold"
@@ -76,6 +80,11 @@ export function BalanceCard({ address, display, loading, copied, isArcChain, isS
             USDC
           </span>
         </div>
+        {(unavailable || stale) && (
+          <p className="mt-2 text-xs" style={{ color: 'rgba(255,255,255,0.72)' }} aria-live="polite">
+            {unavailable ? 'Could not read your balance. Retrying...' : 'Last known balance, updating...'}
+          </p>
+        )}
       </div>
 
       <div className="relative mt-7 flex items-center justify-between gap-3">

@@ -1054,6 +1054,53 @@ export const appStore = {
     return fresh.length
   },
 
+  /**
+   * Chain records are the truth. Adds the ones this browser doesn't know yet, and corrects the
+   * ones it already has (a pending send becomes confirmed, with the real block time, block and
+   * amount). Memos, notes and swap/bridge summaries typed or built in the app are kept.
+   */
+  syncChainRecords(records: Omit<TxRecord, 'id'>[]): number {
+    if (!Array.isArray(records) || records.length === 0) return 0
+    let changed = 0
+    setState((s) => {
+      const list = [...s.txHistory]
+      const index = new Map(list.map((t, i) => [t.txHash.toLowerCase(), i]))
+      for (const r of records) {
+        const key = r.txHash.toLowerCase()
+        const i = index.get(key)
+        if (i === undefined) {
+          list.push({ ...r, fromAddress: normalizeAddress(r.fromAddress), toAddress: normalizeAddress(r.toAddress), id: generateId() })
+          index.set(key, list.length - 1)
+          changed++
+          continue
+        }
+        const prev = list[i]
+        const next: TxRecord = {
+          ...prev,
+          status: 'confirmed',
+          timestamp: r.timestamp,
+          blockNumber: r.blockNumber ?? prev.blockNumber,
+          amount: r.amount,
+          symbol: r.symbol ?? prev.symbol,
+          kind: prev.kind ?? r.kind,
+          note: prev.note ?? r.note,
+          summary: prev.summary ?? r.summary,
+        }
+        const same =
+          next.status === prev.status && next.timestamp === prev.timestamp && next.blockNumber === prev.blockNumber &&
+          next.amount === prev.amount && next.symbol === prev.symbol && next.kind === prev.kind &&
+          next.note === prev.note && next.summary === prev.summary
+        if (same) continue
+        list[i] = next
+        changed++
+      }
+      if (changed === 0) return s
+      list.sort((a, b) => b.timestamp - a.timestamp)
+      return { ...s, txHistory: list }
+    })
+    return changed
+  },
+
   importTxRecords(records: TxRecord[], postedHashes?: Set<string>) {
     if (!Array.isArray(records)) return
     const postedLower = new Set([...(postedHashes ?? [])].map((h) => h.toLowerCase()))

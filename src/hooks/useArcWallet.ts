@@ -3,9 +3,10 @@
 // Amount.parse / parseAmount (exact), display via Amount.toFixed + string
 // grouping. Never Number(raw)/10**dec or parseFloat for validation/balances.
 
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useAccount, useReadContract, useWriteContract, useWaitForTransactionReceipt, useSwitchChain } from 'wagmi'
 import { erc20Abi, isAddress } from 'viem'
+import { readBalance, saveBalance } from '@/lib/balanceCache'
 import { ARC_CHAIN_ID } from '@/chains'
 import { getUsdc, buildTxExplorerUrl } from '@/onchain-facts'
 import { Amount, usdcDecimalsFor, parseAmount } from '@/onchain-money'
@@ -40,25 +41,59 @@ export function useArcAccount() {
   return { address, chainId, isConnected, isConnecting, isDisconnected, isArcChain, isSwitching, switchError, switchToArc }
 }
 
+/**
+ * The wallet's USDC balance. It never shows a made-up 0:
+ * - the last known balance is shown instantly from the browser, then replaced by the live one;
+ * - if a read fails the previous value stays on screen and the read is retried quickly;
+ * - `known` is false only when no balance has ever been read (show a placeholder, not 0).
+ */
 export function useUsdcBalance(address?: `0x${string}`) {
-  const { data, isLoading, refetch } = useReadContract({
+  const { data, isLoading, isFetching, isError, refetch } = useReadContract({
     address: USDC_ADDRESS,
     abi: erc20Abi,
     functionName: 'balanceOf',
     args: address ? [address] : undefined,
     chainId: ARC_CHAIN_ID,
-    query: { enabled: !!address, refetchInterval: 10_000, staleTime: 5_000 },
+    query: {
+      enabled: !!address,
+      refetchInterval: 8_000,
+      staleTime: 3_000,
+      retry: 4,
+      retryDelay: (attempt) => Math.min(400 * 2 ** attempt, 3_000),
+      refetchOnWindowFocus: true,
+      refetchOnReconnect: true,
+    },
   })
 
-  const raw: bigint = (data ?? 0n) as bigint
+  const live = typeof data === 'bigint' ? data : undefined
+  useEffect(() => {
+    if (address && live !== undefined) saveBalance(address, live)
+  }, [address, live])
+
+  const cached = live === undefined ? readBalance(address) : undefined
+  const known = live !== undefined || cached !== undefined
+  const raw: bigint = live ?? cached ?? 0n
   const decimals = usdcDecimalsFor(ARC_CHAIN_ID)
   const amount = Amount.fromRaw(raw, decimals)
   // Exact 2-dec display via Amount.toFixed (string slicing, no float).
   const formatted = amount.toFixed(2)
   // Grouped UI string without parseFloat(formatted) precision loss.
-  const display = groupFixed(formatted)
+  const display = known ? groupFixed(formatted) : '--'
 
-  return { raw, amount, formatted, display, isLoading, refetch }
+  return {
+    raw,
+    amount,
+    formatted,
+    display,
+    /** True only while there is nothing to show yet. */
+    isLoading: !known && (isLoading || isFetching),
+    /** A balance has been read at some point (now or on an earlier visit). */
+    known,
+    /** Showing the remembered balance because the live read has not succeeded yet. */
+    stale: live === undefined && cached !== undefined,
+    isError: isError && live === undefined,
+    refetch,
+  }
 }
 
 export interface SendResult {

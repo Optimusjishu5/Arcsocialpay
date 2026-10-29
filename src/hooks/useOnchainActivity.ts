@@ -18,7 +18,8 @@ import { isSocialPayConfigured, SOCIAL_PAY_ADDRESS } from '../contracts/arcSocia
 
 /** Each step of the scan covers this many days. */
 const CHUNK_DAYS = 2
-const RESYNC_MS = 30_000
+/** New blocks are checked this often, so a new transaction appears within a few seconds. */
+const LIVE_MS = 2_000
 const RETRY_MS = 15_000
 
 export interface Status {
@@ -80,7 +81,7 @@ export function useOnchainActivity(address: string | undefined): void {
     if (!address || !client) return
     const me = address
     const rpc = client
-    const ctx = { cancelled: false, running: false, forwardDue: false, paused: false }
+    const ctx = { cancelled: false, backfilling: false, paused: false }
     const day = BigInt(BLOCKS_PER_DAY)
     const span = day * BigInt(CHUNK_DAYS)
     const social = isSocialPayConfigured() ? SOCIAL_PAY_ADDRESS : null
@@ -89,6 +90,7 @@ export function useOnchainActivity(address: string | undefined): void {
     let head = 0n
     let saved: ScanState | null = null
     let retryTimer: ReturnType<typeof setTimeout> | undefined
+    let forwarding: Promise<boolean> | null = null
 
     const reportCoverage = () => {
       if (!saved) { setStatus({ daysCovered: 0, coverage: 0, complete: false }); return }
@@ -112,10 +114,11 @@ export function useOnchainActivity(address: string | undefined): void {
     async function scan(from: bigint, to: bigint): Promise<bigint> {
       const { scannedLow } = await scanRange(
         rpc, me, UNI_TOKENS, social, from, to, ARC_CHAIN_ID,
-        (done, total) => { if (!ctx.cancelled) setStatus({ progress: Number(done) / Number(total || 1n) }) },
+        (done, total) => { if (!ctx.cancelled && ctx.backfilling) setStatus({ progress: Number(done) / Number(total || 1n) }) },
         (batch: CachedRecord[]) => {
           if (ctx.cancelled) return
-          appStore.mergeTxRecords(batch)
+          // New transactions appear, and pending ones are corrected to the chain's exact details.
+          appStore.syncChainRecords(batch)
           appendCachedRecords(me, batch)
         },
         fast, head,
@@ -123,9 +126,15 @@ export function useOnchainActivity(address: string | undefined): void {
       return scannedLow
     }
 
+    async function latestHead(): Promise<bigint> {
+      try { return await fast.getBlockNumber() } catch { return rpc.getBlockNumber() }
+    }
+
     /** Newest blocks: everything since the last scan (or the first days on a new device). */
     async function forward(): Promise<boolean> {
-      head = await rpc.getBlockNumber()
+      const h = await latestHead()
+      if (saved && h <= BigInt(saved.highest)) return true
+      head = h
       if (!saved) {
         const from = head - span + 1n > 0n ? head - span + 1n : 0n
         const low = await scan(from, head)
@@ -144,6 +153,24 @@ export function useOnchainActivity(address: string | undefined): void {
       return true
     }
 
+    /** Checks for new blocks. One check runs at a time; callers wait for the running one. */
+    function syncForward(): Promise<boolean> {
+      if (forwarding) return forwarding
+      if (ctx.cancelled) return Promise.resolve(true)
+      forwarding = (async () => {
+        try {
+          const ok = await forward()
+          if (ok && !ctx.cancelled) setStatus({ lastSyncedAt: Date.now() })
+          return ok
+        } catch {
+          return false
+        } finally {
+          forwarding = null
+        }
+      })()
+      return forwarding
+    }
+
     /** One step further back in time. Returns false when the step stopped early. */
     async function older(): Promise<boolean> {
       if (!saved) return false
@@ -155,60 +182,61 @@ export function useOnchainActivity(address: string | undefined): void {
       return low <= from
     }
 
-    async function run(): Promise<void> {
-      if (ctx.running || ctx.cancelled) { ctx.forwardDue = true; return }
-      ctx.running = true
+    /** Reads older and older history in the background until the start of the chain. */
+    async function backfill(): Promise<void> {
+      if (ctx.backfilling || ctx.cancelled) return
+      ctx.backfilling = true
       setStatus({ scanning: true, progress: 0, incomplete: false })
       let failed = false
       try {
-        if (!(await forward())) failed = true
+        if (!saved && !(await syncForward())) failed = true
         while (!failed && !ctx.cancelled && !ctx.paused) {
           if (!saved || saved.lowest <= 0) break
-          if (ctx.forwardDue) {
-            ctx.forwardDue = false
-            if (!(await forward())) { failed = true; break }
-          }
           setStatus({ progress: 0 })
           if (!(await older())) failed = true
         }
-        if (!ctx.cancelled) setStatus({ lastSyncedAt: Date.now() })
       } catch {
         failed = true
       } finally {
-        ctx.running = false
+        ctx.backfilling = false
         if (!ctx.cancelled) {
           setStatus({ scanning: false, incomplete: failed, progress: failed ? status.progress : 1 })
-          if (failed) { clearTimeout(retryTimer); retryTimer = setTimeout(() => { void run() }, RETRY_MS) }
+          if (failed) { clearTimeout(retryTimer); retryTimer = setTimeout(() => { void backfill() }, RETRY_MS) }
         }
       }
     }
 
     controls = {
-      sync: () => { void run() },
+      sync: () => { void syncForward(); void backfill() },
       pause: () => { ctx.paused = true; setStatus({ paused: true }) },
-      resume: () => { ctx.paused = false; setStatus({ paused: false }); void run() },
+      resume: () => { ctx.paused = false; setStatus({ paused: false }); void backfill() },
     }
 
     setStatus({ ...INITIAL, paused: false })
     let iv: ReturnType<typeof setInterval> | undefined
+    const wake = () => { if (document.visibilityState === 'visible') void syncForward() }
     void (async () => {
       // Show what earlier visits already found before the first network call.
       const [state, persistent] = await Promise.all([loadWallet(me), isPersistent()])
       if (ctx.cancelled) return
       saved = state
       // The Dashboard and Pay history read the app's own list: give it the newest saved items.
-      appStore.mergeTxRecords(getCachedRecords(me).slice(0, 200))
+      appStore.syncChainRecords(getCachedRecords(me).slice(0, 200))
       setStatus({ ready: true, saved: persistent })
       reportCoverage()
-      void run()
-      // Pick up new activity from other tabs and devices.
-      iv = setInterval(() => { void run() }, RESYNC_MS)
+      void backfill()
+      // Live: look for new blocks every couple of seconds (one cheap call when nothing changed).
+      iv = setInterval(() => { void syncForward() }, LIVE_MS)
+      document.addEventListener('visibilitychange', wake)
+      window.addEventListener('online', wake)
     })()
 
     return () => {
       ctx.cancelled = true
       clearInterval(iv)
       clearTimeout(retryTimer)
+      document.removeEventListener('visibilitychange', wake)
+      window.removeEventListener('online', wake)
       controls = null
     }
   }, [address, client])

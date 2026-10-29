@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { buildEntries, dayLabel, groupByDay, matchesQuery, toCsv } from '../../src/components/activity/entries'
+import { buildEntries, dayLabel, groupByDay, matchesQuery, mergeWalletTransactions, toCsv } from '../../src/components/activity/entries'
 import type { TxRecord } from '../../src/types/index'
 
 const ME = '0x1111111111111111111111111111111111111111'
@@ -54,5 +54,27 @@ describe('search, grouping and export', () => {
     const lines = csv.split('\n')
     expect(lines).toHaveLength(2)
     expect(lines[1]).toContain('"a, b"')
+  })
+})
+
+describe('mergeWalletTransactions', () => {
+  test('joins the app list and the saved chain history once per transaction, newest first', () => {
+    const live = tx(5, { status: 'pending' })
+    const savedSame = tx(5, { id: 'saved5', status: 'confirmed' })
+    const out = mergeWalletTransactions(ME, [live, tx(1)], [savedSame, tx(9), tx(3, { fromAddress: STRANGER, toAddress: OTHER })])
+    expect(out.map((t) => t.timestamp)).toEqual([tx(9).timestamp, tx(5).timestamp, tx(1).timestamp])
+    // the app's own copy (live status) wins over the saved one
+    expect(out.find((t) => t.txHash === live.txHash)!.status).toBe('pending')
+  })
+
+  test('nothing without a connected wallet', () => {
+    expect(mergeWalletTransactions(undefined, [tx(1)])).toEqual([])
+  })
+
+  test('the Dashboard, Pay and Activity lists agree: same input, same transactions', () => {
+    const txs = Array.from({ length: 50 }, (_, i) => tx(i + 1))
+    const merged = mergeWalletTransactions(ME, txs)
+    const entries = buildEntries({ ...base, txHistory: merged })
+    expect(entries.filter((e) => e.tx).map((e) => e.tx!.txHash)).toEqual(merged.map((t) => t.txHash))
   })
 })

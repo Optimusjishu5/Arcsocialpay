@@ -5,16 +5,13 @@ import { motion } from 'framer-motion'
 import { Activity as ActivityIcon, ArrowDownLeft, ArrowUpRight, Download, Search, X } from 'lucide-react'
 import { ConnectKitButton } from 'connectkit'
 import { useArcAccount } from '../hooks/useArcWallet'
-import { useAppStore } from '../store/appStore'
-import { useSettings } from '../hooks/useSettings'
 import { useOnchainStatus } from '../hooks/useOnchainActivity'
-import { useCachedRecords } from '../lib/activityCache'
+import { useWalletActivity } from '../hooks/useWalletActivity'
 import { EmptyState } from './ui/EmptyState'
 import { Button } from './ui/Button'
 import { StatCard, glassCard } from './dashboard/ui'
 import { ActivityRow } from './activity/ActivityRow'
-import { SyncStatus } from './activity/SyncStatus'
-import { FILTERS, buildEntries, groupByDay, matchesQuery, toCsv, type Filter } from './activity/entries'
+import { FILTERS, groupByDay, matchesQuery, toCsv, type Filter } from './activity/entries'
 import { formatUsdcDisplay, isSameAddress } from '../utils/format'
 import { parseUsdc } from '@/onchain-money'
 
@@ -39,26 +36,14 @@ function RowsSkeleton() {
 
 export function ActivityView() {
   const { address, isConnected } = useArcAccount()
-  const { txHistory, posts, comments, notifications } = useAppStore()
-  const { filterNotifications } = useSettings()
   const chain = useOnchainStatus()
   const [filter, setFilter] = useState<Filter>('all')
   const [query, setQuery] = useState('')
   const [page, setPage] = useState({ key: '', count: PAGE })
   const sentinel = useRef<HTMLDivElement>(null)
 
-  // Everything read from the chain lives in the permanent store below; the app's own list
-  // (pending sends, recent items) goes first so a live status wins over a saved copy.
-  const saved = useCachedRecords(address)
-  const allTx = useMemo(
-    () => [...txHistory, ...saved.map((r) => ({ ...r, id: `chain-${r.txHash}` }))],
-    [txHistory, saved],
-  )
-
-  const entries = useMemo(
-    () => (address ? buildEntries({ address, txHistory: allTx, posts, comments, notifications: filterNotifications(notifications) }) : []),
-    [address, allTx, posts, comments, notifications, filterNotifications],
-  )
+  // The same list the Dashboard and Pay screens use, so all three always agree.
+  const { entries } = useWalletActivity(address)
 
   const counts = useMemo(() => {
     const c: Record<Filter, number> = { all: entries.length, payments: 0, swaps: 0, bridges: 0, social: 0 }
@@ -154,8 +139,6 @@ export function ActivityView() {
         <StatCard icon={ArrowDownLeft} tone="green" label="Received" value={formatUsdcDisplay(totals.received)} unit="USDC" />
         <StatCard icon={ArrowUpRight} tone="rose" label="Sent" value={formatUsdcDisplay(totals.sent)} unit="USDC" />
       </div>
-
-      <SyncStatus />
 
       <div className="relative">
         <Search size={16} aria-hidden className="absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" style={{ color: 'var(--subtle)' }} />

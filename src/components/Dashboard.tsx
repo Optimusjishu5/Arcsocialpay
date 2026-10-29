@@ -1,24 +1,26 @@
 import { useState } from 'react'
 import { motion } from 'framer-motion'
 import {
-  ArrowDownLeft, ArrowLeftRight, ArrowUpRight, Activity, Compass, ExternalLink, HandCoins, Layers,
+  ArrowDownLeft, ArrowLeftRight, ArrowUpRight, Activity, Compass, HandCoins, Layers,
   Heart, MessageCircle, Send, Sparkles, Users, CalendarClock, Wallet, Waypoints,
 } from 'lucide-react'
 import { ConnectKitButton } from 'connectkit'
 import { TokenUSDC } from '@web3icons/react'
-import { useArcAccount, useUsdcBalance, ARC_CHAIN_ID } from '../hooks/useArcWallet'
-import { appStore, useAppStore, filterTxHistoryForAddress, filterConversationsForAddress, isSameAddress } from '../store/appStore'
+import { useArcAccount, useUsdcBalance } from '../hooks/useArcWallet'
+import { appStore, useAppStore, filterConversationsForAddress, isSameAddress } from '../store/appStore'
 import { useTxReconciliationOnLoad, useUsdcTransferWatcher, useBackfillMissingTxRecords } from '../hooks/useTxHistory'
 import { Avatar } from './ui/Avatar'
-import { TxStatusBadge } from './ui/TxStatusBadge'
 import { BalanceCard } from './dashboard/BalanceCard'
 import { ActionTile, EmptyRow, GradientIcon, Section, StatCard, glassCard, type Tone } from './dashboard/ui'
 import { formatAddress, formatTimestamp, formatUsdcDisplay } from '../utils/format'
 import { parseUsdc } from '@/onchain-money'
 import { copyText } from '../utils/copy'
-import { buildTxExplorerUrl } from '@/onchain-facts'
 import type { NavView, TxRecord } from '../types/index'
-import { describeTx, txUrl } from '../utils/txPresentation'
+import { useWalletActivity } from '../hooks/useWalletActivity'
+import { ActivityRow } from './activity/ActivityRow'
+
+/** How many of the newest entries the Dashboard lists; Activity has the rest. */
+const RECENT_LIMIT = 25
 
 interface Props {
   onNavigate: (view: NavView, extra?: Record<string, string>) => void
@@ -35,8 +37,10 @@ function totalRaw(txs: TxRecord[]): bigint {
 
 export function Dashboard({ onNavigate }: Props) {
   const { address, isConnected, isArcChain, switchToArc, isSwitching } = useArcAccount()
-  const { display, isLoading: balanceLoading, refetch } = useUsdcBalance(address)
-  const { txHistory, conversations, posts } = useAppStore()
+  const { display, isLoading: balanceLoading, known: balanceKnown, stale: balanceStale, refetch } = useUsdcBalance(address)
+  const { conversations, posts } = useAppStore()
+  // Same list as the Pay and Activity screens: every transaction plus social activity.
+  const { transactions: allTxs, entries } = useWalletActivity(address)
   const [copied, setCopied] = useState(false)
 
   // Reconcile pending history on load and refresh the balance on every USDC transfer.
@@ -44,8 +48,7 @@ export function Dashboard({ onNavigate }: Props) {
   useBackfillMissingTxRecords()
   useUsdcTransferWatcher(address, () => { void refetch() })
 
-  const allTxs = filterTxHistoryForAddress(txHistory, address)
-  const myTxs = allTxs.slice(0, 5)
+  const recent = entries.slice(0, RECENT_LIMIT)
   // Totals count USDC payments only; swaps and bridges are not money sent to or received from someone.
   const confirmed = allTxs.filter((t) => t.status === 'confirmed' && (!t.kind || t.kind === 'payment') && (!t.symbol || t.symbol === 'USDC'))
   const sentTotal = totalRaw(confirmed.filter((t) => isSameAddress(t.fromAddress, address)))
@@ -82,6 +85,8 @@ export function Dashboard({ onNavigate }: Props) {
           address={address!}
           display={display}
           loading={balanceLoading}
+          unavailable={!balanceKnown && !balanceLoading}
+          stale={balanceStale}
           copied={copied}
           isArcChain={isArcChain}
           isSwitching={isSwitching}
@@ -121,11 +126,20 @@ export function Dashboard({ onNavigate }: Props) {
 
         <motion.div variants={item}>
           <Section title="Recent activity" icon={Activity} tone="blue"
-            action={myTxs.length > 0 ? <LinkButton onClick={() => onNavigate('activity')}>View all</LinkButton> : undefined}>
-            {myTxs.length === 0 ? (
-              <EmptyRow icon={Wallet} text="No payments yet" cta="Send your first payment" onCta={() => onNavigate('pay', { mode: 'send' })} />
+            action={entries.length > 0 ? <LinkButton onClick={() => onNavigate('activity')}>View all {entries.length.toLocaleString('en-US')}</LinkButton> : undefined}>
+            {recent.length === 0 ? (
+              <EmptyRow icon={Wallet} text="No activity yet" cta="Send your first payment" onCta={() => onNavigate('pay', { mode: 'send' })} />
             ) : (
-              myTxs.map((tx) => <TxRow key={tx.id} tx={tx} myAddress={address!} />)
+              <div className="max-h-[30rem] overflow-y-auto overscroll-contain pr-0.5" role="list" aria-label="Recent activity">
+                {recent.map((e) => <ActivityRow key={e.id} entry={e} />)}
+                {entries.length > recent.length && (
+                  <button onClick={() => onNavigate('activity')}
+                    className="w-full h-11 mt-1 rounded-2xl text-sm font-semibold transition-colors hover:bg-[var(--surface-muted)]"
+                    style={{ color: 'var(--accent)' }}>
+                    See {(entries.length - recent.length).toLocaleString('en-US')} more in Activity
+                  </button>
+                )}
+              </div>
             )}
           </Section>
         </motion.div>
@@ -242,37 +256,5 @@ function LinkButton({ onClick, children }: { onClick: () => void; children: Reac
     <button onClick={onClick} className="text-xs font-semibold px-3 h-8 rounded-full transition-colors hover:bg-[var(--surface-muted)]" style={{ color: 'var(--accent)' }}>
       {children}
     </button>
-  )
-}
-
-function TxRow({ tx, myAddress }: { tx: TxRecord; myAddress: string }) {
-  const v = describeTx(tx, myAddress)
-  const explorerUrl = txUrl(tx)
-
-  return (
-    <div className="flex items-center gap-3 p-3 rounded-2xl transition-colors hover:bg-[var(--surface-muted)]">
-      <GradientIcon icon={v.icon} tone={v.tone} size={38} />
-      <div className="flex-1 min-w-0">
-        <div className="flex items-center gap-2">
-          <span className="text-sm font-semibold" style={{ color: 'var(--ink)' }}>{v.title}</span>
-          <TxStatusBadge status={tx.status} />
-        </div>
-        <div className="text-xs truncate" style={{ color: 'var(--muted)' }}>
-          {v.detail} · {formatTimestamp(tx.timestamp)}
-        </div>
-      </div>
-      <div className="flex items-center gap-2">
-        {v.amountText && (
-          <span className="tabnum font-bold text-sm" style={{ color: v.sign === '-' ? 'var(--danger)' : 'var(--success)' }}>
-            {v.sign}{v.amountText}
-          </span>
-        )}
-        <a href={explorerUrl} target="_blank" rel="noopener noreferrer" aria-label="View on explorer"
-          className="w-7 h-7 rounded-full flex items-center justify-center transition-colors hover:bg-[var(--surface-strong)]"
-          style={{ color: 'var(--muted)' }}>
-          <ExternalLink size={12} />
-        </a>
-      </div>
-    </div>
   )
 }

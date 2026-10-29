@@ -36,6 +36,10 @@ function rebuild(addr: string) {
   snapshots.set(addr, m ? [...m.values()].sort((a, b) => b.timestamp - a.timestamp) : EMPTY)
 }
 
+/** Everything that is shown for a record, so an updated copy replaces an outdated one. */
+const sig = (r: CachedRecord) =>
+  [r.status, r.timestamp, r.blockNumber, r.amount, r.symbol, r.kind, r.note, r.summary, r.direction, r.fromAddress, r.toAddress].join('|')
+
 function putMemory(addr: string, records: CachedRecord[]): boolean {
   let m = memory.get(addr)
   if (!m) { m = new Map(); memory.set(addr, m) }
@@ -43,7 +47,7 @@ function putMemory(addr: string, records: CachedRecord[]): boolean {
   for (const r of records) {
     const key = lower(r.txHash)
     const prev = m.get(key)
-    if (prev && prev.status === r.status && prev.timestamp === r.timestamp && prev.note === r.note) continue
+    if (prev && sig(prev) === sig(r)) continue
     m.set(key, r)
     changed = true
   }

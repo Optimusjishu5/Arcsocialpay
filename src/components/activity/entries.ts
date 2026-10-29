@@ -53,6 +53,27 @@ interface Sources {
   notifications: Notification[]
 }
 
+/**
+ * One list of transactions for a wallet from every place they are kept: the app's own list
+ * (pending sends first, so a live status wins) and the permanent chain history. Each
+ * transaction appears once, newest first. Nothing is capped or dropped.
+ */
+export function mergeWalletTransactions(address: string | undefined, ...lists: TxRecord[][]): TxRecord[] {
+  if (!address) return []
+  const seen = new Set<string>()
+  const out: TxRecord[] = []
+  for (const list of lists) {
+    for (const t of list) {
+      if (!isSameAddress(t.fromAddress, address) && !isSameAddress(t.toAddress, address)) continue
+      const key = t.txHash.toLowerCase()
+      if (seen.has(key)) continue
+      seen.add(key)
+      out.push(t)
+    }
+  }
+  return out.sort((a, b) => b.timestamp - a.timestamp || (b.blockNumber ?? 0) - (a.blockNumber ?? 0))
+}
+
 /** Every transaction for the wallet (nothing is dropped) plus social activity, newest first. */
 export function buildEntries({ address, txHistory, posts, comments, notifications }: Sources): Entry[] {
   const list: Entry[] = []
@@ -92,7 +113,8 @@ export function buildEntries({ address, txHistory, posts, comments, notification
       title: `${formatAddress(n.fromAddress)} ${NOTIF_TEXT[n.type]}`, detail: n.content ? preview(n.content) : undefined,
     })
   }
-  return list.sort((a, b) => b.at - a.at)
+  // Newest first; entries from the same moment keep chain order (later block first).
+  return list.sort((a, b) => b.at - a.at || (b.tx?.blockNumber ?? 0) - (a.tx?.blockNumber ?? 0))
 }
 
 export function matchesQuery(e: Entry, q: string): boolean {

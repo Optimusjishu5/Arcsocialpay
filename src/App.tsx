@@ -3,7 +3,7 @@
 import { useState, useEffect } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { isAddress } from 'viem'
-import { useArcAccount } from './hooks/useArcWallet'
+import { useArcAccount, useUsdcBalance } from './hooks/useArcWallet'
 import { usePersistentChat } from './hooks/usePersistentChat'
 import { usePersistentSocial } from './hooks/usePersistentSocial'
 import { usePersistentTxHistory } from './hooks/usePersistentTxHistory'
@@ -77,6 +77,9 @@ export default function App() {
       html.classList.remove('dark')
     }
   }, [theme])
+
+  // Start reading the balance as soon as a wallet connects, so it is ready before any page needs it.
+  useUsdcBalance(address)
 
   // Ensure profile on connect
   useEffect(() => {
