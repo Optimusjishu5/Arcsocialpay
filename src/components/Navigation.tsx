@@ -1,13 +1,15 @@
 import { motion } from 'framer-motion'
 import {
-  LayoutDashboard, MessageSquare, DollarSign, Compass, Bell, User, Moon, Sun,
+  LayoutDashboard, MessageSquare, DollarSign, Compass, Bell, User, Moon, Sun, Activity, Settings, ArrowLeftRight, Waypoints,
 } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 import { ConnectKitButton } from 'connectkit'
 import { useArcAccount } from '../hooks/useArcWallet'
-import { useTheme, useAppStore } from '../store/appStore'
+import { useTheme, useAppStore, appStore } from '../store/appStore'
+import { useSettings } from '../hooks/useSettings'
 import { Avatar } from './ui/Avatar'
 import { NetworkBadge } from './ui/NetworkBadge'
+import { GradientIcon, TONES, type Tone } from './dashboard/ui'
 import type { NavView } from '../types/index'
 
 interface Props {
@@ -15,13 +17,17 @@ interface Props {
   onNavigate: (view: NavView) => void
 }
 
-const NAV_ITEMS: { id: NavView; label: string; icon: LucideIcon }[] = [
-  { id: 'home', label: 'Home', icon: LayoutDashboard },
-  { id: 'messages', label: 'Messages', icon: MessageSquare },
-  { id: 'pay', label: 'Pay', icon: DollarSign },
-  { id: 'explore', label: 'Explore', icon: Compass },
-  { id: 'notifications', label: 'Alerts', icon: Bell },
-  { id: 'profile', label: 'Profile', icon: User },
+const NAV_ITEMS: { id: NavView; label: string; icon: LucideIcon; tone: Tone }[] = [
+  { id: 'home', label: 'Home', icon: LayoutDashboard, tone: 'blue' },
+  { id: 'messages', label: 'Messages', icon: MessageSquare, tone: 'violet' },
+  { id: 'pay', label: 'Pay', icon: DollarSign, tone: 'green' },
+  { id: 'swap', label: 'Swap', icon: ArrowLeftRight, tone: 'indigo' },
+  { id: 'bridge', label: 'Bridge', icon: Waypoints, tone: 'amber' },
+  { id: 'explore', label: 'Explore', icon: Compass, tone: 'rose' },
+  { id: 'activity', label: 'Activity', icon: Activity, tone: 'teal' },
+  { id: 'notifications', label: 'Alerts', icon: Bell, tone: 'pink' },
+  { id: 'profile', label: 'Profile', icon: User, tone: 'blue' },
+  { id: 'settings', label: 'Settings', icon: Settings, tone: 'indigo' },
 ]
 
 // ── Desktop Sidebar ────────────────────────────────────────────────────────
@@ -30,7 +36,8 @@ export function DesktopNav({ current, onNavigate }: Props) {
   const { address, isConnected } = useArcAccount()
   const { theme, setTheme } = useTheme()
   const { notifications } = useAppStore()
-  const unread = notifications.filter((n) => !n.read).length
+  const { filterNotifications } = useSettings()
+  const unread = filterNotifications(notifications).filter((n) => !n.read).length
 
   return (
     <nav className="hidden md:flex flex-col h-dvh sticky top-0 flex-shrink-0"
@@ -47,7 +54,7 @@ export function DesktopNav({ current, onNavigate }: Props) {
 
       {/* Nav items */}
       <div className="flex-1 px-3 space-y-1 overflow-y-auto">
-        {NAV_ITEMS.map(({ id, label, icon: Icon }) => {
+        {NAV_ITEMS.map(({ id, label, icon, tone }) => {
           const isActive = current === id
           const hasNotif = id === 'notifications' && unread > 0
 
@@ -62,7 +69,7 @@ export function DesktopNav({ current, onNavigate }: Props) {
                 fontWeight: isActive ? 600 : 500,
               }}>
               <div className="relative">
-                <Icon size={20} />
+                <GradientIcon icon={icon} tone={tone} size={30} />
                 {hasNotif && (
                   <span className="absolute -top-1 -right-1 w-4 h-4 rounded-full text-xs font-bold flex items-center justify-center"
                     style={{ background: 'var(--danger)', color: '#fff', fontSize: 9 }}>
@@ -126,11 +133,9 @@ export function DesktopNav({ current, onNavigate }: Props) {
 // ── Mobile Bottom Tab Bar ──────────────────────────────────────────────────
 
 export function MobileNav({ current, onNavigate }: Props) {
-  const { notifications } = useAppStore()
-  const unread = notifications.filter((n) => !n.read).length
-
-  // Show 5 items on mobile — drop Explore (still reachable via desktop/gestures), keep Profile.
-  const mobileItems = NAV_ITEMS.filter((n) => n.id !== 'explore')
+  const { theme } = useTheme()
+  // Seven tabs on mobile; the bar scrolls sideways on narrow screens. Alerts, Settings and Profile live in the top bar.
+  const mobileItems = NAV_ITEMS.filter((n) => ['home', 'messages', 'pay', 'swap', 'bridge', 'explore', 'activity'].includes(n.id))
 
   return (
     <nav className="md:hidden fixed bottom-0 left-0 right-0 z-40 safe-bottom"
@@ -139,25 +144,20 @@ export function MobileNav({ current, onNavigate }: Props) {
         borderTop: '1px solid var(--border)',
         backdropFilter: 'blur(16px)',
       }}>
-      <div className="flex items-center justify-around px-2 pt-2 pb-1">
-        {mobileItems.map(({ id, label, icon: Icon }) => {
+      <div className="flex items-center px-2 pt-2 pb-1 overflow-x-auto" style={{ scrollbarWidth: 'none' }}>
+        {mobileItems.map(({ id, label, icon: Icon, tone }) => {
           const isActive = current === id
-          const hasNotif = id === 'notifications' && unread > 0
 
           return (
             <button
               key={id}
               onClick={() => onNavigate(id)}
-              className="flex flex-col items-center gap-0.5 flex-1 py-1 rounded-xl transition-colors relative min-w-0"
+              className="flex flex-col items-center gap-0.5 flex-1 py-1 rounded-xl transition-colors relative min-w-[64px]"
               style={{ color: isActive ? 'var(--accent)' : 'var(--muted)' }}>
               <div className="relative">
-                <Icon size={22} />
-                {hasNotif && (
-                  <span className="absolute -top-1 -right-1 w-3.5 h-3.5 rounded-full text-xs font-bold flex items-center justify-center"
-                    style={{ background: 'var(--danger)', color: '#fff', fontSize: 8 }}>
-                    {unread}
-                  </span>
-                )}
+                {isActive
+                  ? <GradientIcon icon={Icon} tone={tone} size={32} />
+                  : <span className="inline-flex items-center justify-center" style={{ width: 32, height: 32, color: TONES[tone][theme === 'dark' ? 0 : 1] }}><Icon size={22} /></span>}
               </div>
               <span className={`text-xs font-medium ${isActive ? 'font-semibold' : ''}`}>{label}</span>
             </button>
@@ -170,9 +170,18 @@ export function MobileNav({ current, onNavigate }: Props) {
 
 // ── Mobile Top Bar ─────────────────────────────────────────────────────────
 
-export function MobileTopBar({ title, onNavigate: _onNavigate }: { title: string; onNavigate: (view: NavView) => void }) {
+/** Ring color around a profile picture: the profile's chosen color, or blue until one is picked. */
+function profileTone(addr: string): Tone {
+  const picked = appStore.getProfile(addr)?.accent
+  return picked && picked in TONES ? (picked as Tone) : 'blue'
+}
+
+export function MobileTopBar({ title, onNavigate }: { title: string; onNavigate: (view: NavView) => void }) {
   const { address, isConnected } = useArcAccount()
   const { theme, setTheme } = useTheme()
+  const { notifications } = useAppStore()
+  const { filterNotifications } = useSettings()
+  const unread = filterNotifications(notifications).filter((n) => !n.read).length
 
   return (
     <div className="md:hidden flex items-center justify-between px-4 py-3 sticky top-0 z-40"
@@ -188,14 +197,36 @@ export function MobileTopBar({ title, onNavigate: _onNavigate }: { title: string
           style={{ color: 'var(--muted)' }}>
           {theme === 'dark' ? <Sun size={16} /> : <Moon size={16} />}
         </button>
+        <button onClick={() => onNavigate('notifications')} aria-label="Alerts"
+          className="relative w-8 h-8 rounded-lg flex items-center justify-center transition-colors hover:bg-[var(--surface-muted)]"
+          style={{ color: 'var(--muted)' }}>
+          <Bell size={16} />
+          {unread > 0 && (
+            <span className="absolute -top-0.5 -right-0.5 min-w-3.5 h-3.5 px-0.5 rounded-full font-bold flex items-center justify-center"
+              style={{ background: 'var(--danger)', color: '#fff', fontSize: 8 }}>
+              {unread > 9 ? '9+' : unread}
+            </span>
+          )}
+        </button>
+        <button onClick={() => onNavigate('settings')} aria-label="Settings"
+          className="w-8 h-8 rounded-lg flex items-center justify-center transition-colors hover:bg-[var(--surface-muted)]"
+          style={{ color: 'var(--muted)' }}>
+          <Settings size={16} />
+        </button>
         {isConnected && address ? (
-          <ConnectKitButton.Custom>
-            {({ show }) => (
-              <button onClick={show}>
-                <Avatar address={address} size={32} />
-              </button>
-            )}
-          </ConnectKitButton.Custom>
+          <button onClick={() => onNavigate('profile')} aria-label="Your profile" className="transition-transform hover:scale-105 active:scale-95">
+            <span
+              className="block rounded-full p-[2px]"
+              style={{
+                background: `linear-gradient(135deg, ${TONES[profileTone(address)][0]}, ${TONES[profileTone(address)][1]})`,
+                boxShadow: `0 6px 14px -6px ${TONES[profileTone(address)][1]}`,
+              }}
+            >
+              <span className="block rounded-full p-[2px]" style={{ background: 'var(--bg)' }}>
+                <Avatar address={address} size={28} />
+              </span>
+            </span>
+          </button>
         ) : (
           <ConnectKitButton label="Connect" />
         )}

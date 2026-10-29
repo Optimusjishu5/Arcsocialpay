@@ -65,6 +65,8 @@ function toProfile(raw: unknown): UserProfile | null {
     username: String(p.username ?? ''),
     bio: String(p.bio ?? ''),
     avatarSeed: String(p.avatarSeed ?? p.address),
+    avatarUrl: typeof p.avatarUrl === 'string' ? p.avatarUrl : '',
+    accent: typeof p.accent === 'string' ? p.accent : '',
     followerCount: typeof p.followerCount === 'number' ? p.followerCount : 0,
     followingCount: typeof p.followingCount === 'number' ? p.followingCount : 0,
     createdAt: typeof p.createdAt === 'number' ? p.createdAt : Date.now(),

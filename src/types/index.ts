@@ -1,6 +1,7 @@
 // ── Core application types ─────────────────────────────────────────────────
 
-export type NavView = 'home' | 'messages' | 'pay' | 'explore' | 'notifications' | 'profile'
+export type NavView =
+  | 'home' | 'messages' | 'pay' | 'swap' | 'bridge' | 'explore' | 'activity' | 'notifications' | 'profile' | 'settings'
 
 // ── User / Profile ─────────────────────────────────────────────────────────
 
@@ -9,6 +10,8 @@ export interface UserProfile {
   username: string
   bio: string
   avatarSeed: string // used to generate deterministic avatar color/initials
+  avatarUrl?: string // uploaded profile picture (small compressed data URL)
+  accent?: string // profile color: blue, violet, pink, ...
   followerCount: number
   followingCount: number
   createdAt: number
@@ -52,6 +55,8 @@ export interface Message {
   replyToId?: string
   deletedForMe?: boolean
   paymentTx?: PaymentMessage
+  /** EIP-712 signature by the sender (see lib/chatAuth). Present on server-synced text messages. */
+  signature?: string
 }
 
 export interface PaymentMessage {
@@ -96,6 +101,8 @@ export interface Group {
 
 export type TxStatus = 'pending' | 'confirmed' | 'failed'
 export type TxDirection = 'sent' | 'received'
+/** What a history entry is. Missing means a plain payment. */
+export type TxKind = 'payment' | 'swap' | 'bridge'
 
 export interface TxRecord {
   id: string
@@ -109,6 +116,11 @@ export interface TxRecord {
   timestamp: number
   note?: string
   blockNumber?: number
+  kind?: TxKind
+  /** One-line description for swaps and bridges, e.g. "5 USDC to 4.48 EURC". */
+  summary?: string
+  /** Token the amount is in. Missing means USDC. */
+  symbol?: string
 }
 
 // ── Notification ───────────────────────────────────────────────────────────

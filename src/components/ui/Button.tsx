@@ -34,6 +34,7 @@ export function Button({
   return (
     <button
       className={clsx(base, variants[variant], sizes[size], className)}
+      data-variant={variant}
       disabled={disabled || loading}
       {...rest}
     >

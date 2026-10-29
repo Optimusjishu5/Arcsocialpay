@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { ArrowUpRight, ArrowDownLeft, Copy, Check, ExternalLink, QrCode, AlertCircle, X } from 'lucide-react'
+import { Send as SendIcon, Layers, HandCoins, Users, CalendarClock, ArrowLeftRight, Waypoints, ArrowUpRight, ArrowDownLeft, Copy, Check, ExternalLink, QrCode, AlertCircle, X, RefreshCw } from 'lucide-react'
 import { ConnectKitButton } from 'connectkit'
 import { isAddress } from 'viem'
 import { useWaitForTransactionReceipt } from 'wagmi'
@@ -13,6 +13,16 @@ import { TxStatusBadge, TxSpinner } from './ui/TxStatusBadge'
 import { Avatar } from './ui/Avatar'
 import { formatAddress, formatTimestamp, parseOnchainError, ZERO_ADDRESS, AMOUNT_REGEX, isSameAddress, maxSendableRaw, formatUsdcDisplay } from '../utils/format'
 import { copyText } from '../utils/copy'
+import { ShareLinkBox } from './pay/ShareLinkBox'
+import { GradientIcon, toneVars, type Tone } from './dashboard/ui'
+import { describeTx, txUrl } from '../utils/txPresentation'
+import { useOnchainStatus } from '../hooks/useOnchainActivity'
+import { buildRequestPath } from '../utils/payRequests'
+import { useScheduledPayments } from '../hooks/useScheduledPayments'
+import { BatchForm } from './pay/BatchForm'
+import { RequestForm } from './pay/RequestForm'
+import { SplitBillForm } from './pay/SplitBillForm'
+import { ScheduleForm } from './pay/ScheduleForm'
 import { buildTxExplorerUrl } from '@/onchain-facts'
 import type { NavView } from '../types/index'
 
@@ -38,17 +48,60 @@ function formatMaxWithReserve(balance: bigint): string {
   return trimmed === '' ? '0' : trimmed
 }
 
+export type PayMode = 'send' | 'batch' | 'request' | 'split' | 'schedule' | 'receive'
+
+const MODE_LABELS: Record<PayMode, string> = {
+  send: 'Send',
+  batch: 'Batch',
+  request: 'Request',
+  split: 'Split',
+  schedule: 'Schedule',
+  receive: 'Receive',
+}
+
+const MODE_STYLE: Record<PayMode, { icon: typeof SendIcon; tone: Tone }> = {
+  send: { icon: SendIcon, tone: 'blue' },
+  batch: { icon: Layers, tone: 'indigo' },
+  request: { icon: HandCoins, tone: 'rose' },
+  split: { icon: Users, tone: 'teal' },
+  schedule: { icon: CalendarClock, tone: 'amber' },
+  receive: { icon: ArrowDownLeft, tone: 'green' },
+}
+
+interface SendPrefill {
+  recipient?: string
+  amount?: string
+  note?: string
+  scheduleId?: string
+  nonce: number
+}
+
 interface Props {
-  initialMode?: 'send' | 'receive'
+  initialMode?: PayMode
   initialRecipient?: string
+  initialAmount?: string
+  initialNote?: string
+  /** Expiry of the payment link that opened this page (ms epoch). */
+  initialExpiresAt?: number
   onNavigate: (view: NavView, extra?: Record<string, string>) => void
 }
 
-export function PayView({ initialMode = 'send', initialRecipient, onNavigate: _onNavigate }: Props) {
-  const [mode, setMode] = useState<'send' | 'receive'>(initialMode)
+export function PayView({ initialMode = 'send', initialRecipient, initialAmount, initialNote, initialExpiresAt, onNavigate }: Props) {
+  const [mode, setMode] = useState<PayMode>(initialMode)
+  const [openedAt] = useState(() => Date.now())
+  const linkExpired = initialExpiresAt !== undefined && initialExpiresAt <= openedAt
+  const [prefill, setPrefill] = useState<SendPrefill>({
+    recipient: initialRecipient,
+    // An expired request must not pre-fill its amount or note.
+    amount: linkExpired ? undefined : initialAmount,
+    note: linkExpired ? undefined : initialNote,
+    nonce: 0,
+  })
   const { address, isConnected, isArcChain, switchToArc, isSwitching } = useArcAccount()
+  const scheduled = useScheduledPayments(address)
   const { display: balanceDisplay, raw: balanceRaw, refetch } = useUsdcBalance(address)
   const { txHistory } = useAppStore()
+  const chain = useOnchainStatus()
 
   if (!isConnected) {
     return (
@@ -66,21 +119,53 @@ export function PayView({ initialMode = 'send', initialRecipient, onNavigate: _o
   )
 
   return (
-    <div className="flex flex-col gap-4 px-4 pt-4 pb-8 max-w-lg mx-auto">
+    <div className="tone-scope flex flex-col gap-4 px-4 pt-4 pb-8 max-w-lg mx-auto" style={toneVars(MODE_STYLE[mode].tone)}>
       {/* Tab switcher */}
-      <div className="flex gap-1 p-1 rounded-xl" style={{ background: 'var(--surface-muted)' }}>
-        {(['send', 'receive'] as const).map((m) => (
-          <button key={m} onClick={() => setMode(m)}
-            className="flex-1 h-9 rounded-lg font-semibold text-sm capitalize transition-all"
-            style={{
-              background: mode === m ? 'var(--surface-strong)' : 'transparent',
-              color: mode === m ? 'var(--ink)' : 'var(--muted)',
-              boxShadow: mode === m ? '0 1px 4px rgba(0,0,0,0.08)' : 'none',
-            }}>
-            {m === 'send' ? 'Send USDC' : 'Receive USDC'}
-          </button>
-        ))}
+      <div className="grid grid-cols-3 sm:grid-cols-6 gap-2">
+        {(Object.keys(MODE_LABELS) as PayMode[]).map((m) => {
+          const { icon, tone } = MODE_STYLE[m]
+          const active = mode === m
+          return (
+            <button key={m} onClick={() => setMode(m)} aria-pressed={active}
+              className="flex flex-col items-center gap-1.5 py-2.5 rounded-2xl transition-all active:scale-95 hover:-translate-y-0.5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus)]"
+              style={{
+                background: active ? 'var(--surface-strong)' : 'var(--surface)',
+                border: `1.5px solid ${active ? 'var(--border-strong)' : 'var(--border)'}`,
+                boxShadow: active ? '0 10px 24px -12px rgba(8,20,40,0.45)' : 'none',
+              }}>
+              <GradientIcon icon={icon} tone={tone} size={34} />
+              <span className="text-xs font-semibold" style={{ color: active ? 'var(--ink)' : 'var(--muted)' }}>{MODE_LABELS[m]}</span>
+            </button>
+          )
+        })}
       </div>
+
+      <div className="grid grid-cols-2 gap-2">
+        <button onClick={() => onNavigate('swap')}
+          className="h-14 rounded-2xl text-sm font-semibold flex items-center justify-center gap-3 transition-all active:scale-95 hover:-translate-y-0.5"
+          style={{ background: 'var(--surface)', border: '1px solid var(--border)', color: 'var(--ink)' }}>
+          <GradientIcon icon={ArrowLeftRight} tone="violet" size={34} /> Swap
+        </button>
+        <button onClick={() => onNavigate('bridge')}
+          className="h-14 rounded-2xl text-sm font-semibold flex items-center justify-center gap-3 transition-all active:scale-95 hover:-translate-y-0.5"
+          style={{ background: 'var(--surface)', border: '1px solid var(--border)', color: 'var(--ink)' }}>
+          <GradientIcon icon={Waypoints} tone="amber" size={34} /> Bridge
+        </button>
+      </div>
+
+      {initialExpiresAt !== undefined && mode === 'send' && (
+        <div className="flex items-start gap-2 p-3 rounded-xl text-sm"
+          style={linkExpired
+            ? { background: 'var(--danger-bg)', color: 'var(--danger)' }
+            : { background: 'var(--surface-muted)', color: 'var(--ink-2)' }}>
+          <AlertCircle size={16} className="flex-shrink-0 mt-0.5" />
+          <span>
+            {linkExpired
+              ? `This payment request expired on ${new Date(initialExpiresAt).toLocaleString()}. Ask for a new link before paying.`
+              : `This payment request expires ${new Date(initialExpiresAt).toLocaleString()}.`}
+          </span>
+        </div>
+      )}
 
       {!isArcChain && (
         <div className="flex items-center gap-3 p-3 rounded-xl"
@@ -102,59 +187,88 @@ export function PayView({ initialMode = 'send', initialRecipient, onNavigate: _o
             animate={{ opacity: 1, x: 0 }}
             exit={{ opacity: 0, x: 20 }}
             transition={{ duration: 0.15 }}>
-            <SendForm balance={balanceRaw} balanceDisplay={balanceDisplay} onSuccess={() => { refetch().catch(() => toast.error('Failed to refresh balance')) }} myAddress={address!} initialRecipient={initialRecipient} />
+            <SendForm
+              key={prefill.nonce}
+              balance={balanceRaw}
+              balanceDisplay={balanceDisplay}
+              onSuccess={() => { refetch().catch(() => toast.error('Failed to refresh balance')) }}
+              myAddress={address!}
+              initialRecipient={prefill.recipient}
+              initialAmount={prefill.amount}
+              initialNote={prefill.note}
+              onSent={() => {
+                if (!prefill.scheduleId) return
+                scheduled.markPaid(prefill.scheduleId)
+                setPrefill((p) => ({ ...p, scheduleId: undefined }))
+              }}
+            />
           </motion.div>
         ) : (
-          <motion.div key="receive"
+          <motion.div key={mode}
             initial={{ opacity: 0, x: 20 }}
             animate={{ opacity: 1, x: 0 }}
             exit={{ opacity: 0, x: -20 }}
             transition={{ duration: 0.15 }}>
-            <ReceiveCard address={address!} />
+            {mode === 'batch' && <BatchForm address={address!} />}
+            {mode === 'request' && <RequestForm address={address!} />}
+            {mode === 'split' && <SplitBillForm address={address!} />}
+            {mode === 'schedule' && (
+              <ScheduleForm
+                address={address!}
+                onPayNow={(s) => {
+                  setPrefill((p) => ({ recipient: s.recipient, amount: s.amount, note: s.note, scheduleId: s.id, nonce: p.nonce + 1 }))
+                  setMode('send')
+                }}
+              />
+            )}
+            {mode === 'receive' && <ReceiveCard address={address!} />}
           </motion.div>
         )}
       </AnimatePresence>
 
       {/* Transaction History */}
-      {myTxs.length > 0 && (
-        <div className="rounded-2xl overflow-hidden" style={{ background: 'var(--surface)', border: '1px solid var(--border)' }}>
-          <div className="px-4 py-3" style={{ borderBottom: '1px solid var(--border)' }}>
-            <h3 className="display font-semibold text-sm" style={{ color: 'var(--ink)' }}>Transaction History</h3>
-          </div>
+      <div className="rounded-2xl overflow-hidden" data-tc="">
+        <div className="px-4 py-3 flex items-center justify-between gap-2" style={{ borderBottom: '1px solid var(--border)' }}>
+          <h3 className="display font-semibold text-sm" style={{ color: 'var(--ink)' }}>History</h3>
+          <button
+            type="button"
+            onClick={chain.rescan}
+            disabled={chain.scanning}
+            className="inline-flex items-center gap-1.5 text-xs font-semibold disabled:opacity-60"
+            style={{ color: 'var(--tone-text)' }}
+          >
+            <RefreshCw size={12} className={chain.scanning ? 'animate-spin' : ''} />
+            {chain.scanning ? `Checking Arc ${Math.round(chain.progress * 100)}%` : 'Refresh from chain'}
+          </button>
+        </div>
+        {myTxs.length === 0 ? (
+          <p className="px-4 py-8 text-center text-sm" style={{ color: 'var(--muted)' }}>
+            {chain.scanning ? 'Looking for your payments, swaps and bridges...' : `No payments, swaps or bridges found in the last ${chain.daysCovered || 2} days. Open Activity and tap Load older to look further back.`}
+          </p>
+        ) : (
           <div className="divide-y" style={{ borderColor: 'var(--border)' }}>
-            {myTxs.map((tx) => {
-              const isSent = isSameAddress(tx.fromAddress, address)
+            {myTxs.slice(0, 30).map((tx) => {
+              const v = describeTx(tx, address ?? '')
               return (
                 <div key={tx.id} className="flex items-center gap-3 px-4 py-3">
-                  <div className="w-9 h-9 rounded-full flex items-center justify-center flex-shrink-0"
-                    style={{
-                      background: isSent ? 'var(--danger-bg)' : 'var(--success-bg)',
-                      color: isSent ? 'var(--danger)' : 'var(--success)',
-                    }}>
-                    {isSent ? <ArrowUpRight size={18} /> : <ArrowDownLeft size={18} />}
-                  </div>
+                  <GradientIcon icon={v.icon} tone={v.tone} size={36} />
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2 mb-0.5">
-                      <span className="text-sm font-medium" style={{ color: 'var(--ink)' }}>
-                        {isSent ? `To ${formatAddress(tx.toAddress)}` : `From ${formatAddress(tx.fromAddress)}`}
-                      </span>
+                      <span className="text-sm font-medium" style={{ color: 'var(--ink)' }}>{v.title}</span>
                       <TxStatusBadge status={tx.status} />
                     </div>
-                    <div className="flex items-center gap-2">
-                      <span className="text-xs mono" style={{ color: 'var(--muted)' }}>
-                        {tx.txHash.slice(0, 10)}...
-                      </span>
-                      <span className="text-xs" style={{ color: 'var(--subtle)' }}>
-                        {formatTimestamp(tx.timestamp)}
-                      </span>
-                    </div>
+                    <p className="text-xs truncate" style={{ color: 'var(--muted)' }}>
+                      {v.detail} · {formatTimestamp(tx.timestamp)}
+                    </p>
                   </div>
                   <div className="flex items-center gap-2">
-                    <span className="tabnum font-semibold text-sm"
-                      style={{ color: isSent ? 'var(--danger)' : 'var(--success)' }}>
-                      {isSent ? '-' : '+'}{tx.amount}
-                    </span>
-                    <a href={buildTxExplorerUrl(ARC_CHAIN_ID, tx.txHash)} target="_blank" rel="noopener noreferrer"
+                    {v.amountText && (
+                      <span className="tabnum font-semibold text-sm" style={{ color: v.sign === '-' ? 'var(--danger)' : 'var(--success)' }}>
+                        {v.sign}{v.amountText}
+                      </span>
+                    )}
+                    <a href={txUrl(tx)} target="_blank" rel="noopener noreferrer"
+                      aria-label="View on explorer"
                       className="p-1 rounded hover:bg-[var(--surface-muted)] transition-colors"
                       style={{ color: 'var(--muted)' }}>
                       <ExternalLink size={12} />
@@ -164,8 +278,8 @@ export function PayView({ initialMode = 'send', initialRecipient, onNavigate: _o
               )
             })}
           </div>
-        </div>
-      )}
+        )}
+      </div>
     </div>
   )
 }
@@ -173,19 +287,25 @@ export function PayView({ initialMode = 'send', initialRecipient, onNavigate: _o
 // ── Send Form ──────────────────────────────────────────────────────────────
 
 function SendForm({
-  balance, balanceDisplay, onSuccess, myAddress, initialRecipient,
+  balance, balanceDisplay, onSuccess, myAddress, initialRecipient, initialAmount, initialNote, onSent,
 }: {
   balance: bigint
   balanceDisplay: string
   onSuccess: () => void
   myAddress: string
   initialRecipient?: string
+  initialAmount?: string
+  initialNote?: string
+  onSent?: () => void
 }) {
   const [recipient, setRecipient] = useState(() =>
     initialRecipient && isAddress(initialRecipient) ? initialRecipient : '',
   )
-  const [amount, setAmount] = useState('')
-  const [note, setNote] = useState('')
+  const [amount, setAmount] = useState(initialAmount ?? '')
+  const [note, setNote] = useState(initialNote ?? '')
+  const onSentRef = useRef(onSent)
+  onSentRef.current = onSent
+  const sentNotifiedRef = useRef<Set<string>>(new Set())
   const [stage, setStage] = useState<'form' | 'preview' | 'done'>('form')
   const [localError, setLocalError] = useState('')
   const [receiptFailed, setReceiptFailed] = useState(false)
@@ -249,6 +369,10 @@ function SendForm({
     if (activeReceipt?.status === 'success') {
       appStore.updateTxRecord(activeHash, { status: 'confirmed' })
       onSuccess()
+      if (!sentNotifiedRef.current.has(activeHash)) {
+        sentNotifiedRef.current.add(activeHash)
+        onSentRef.current?.()
+      }
       setReceiptFailed(false)
       setTimeout(() => setStage('done'), 0)
     } else if (activeReceipt?.status === 'reverted' || (!useContract && (isSuccess && receipt && receipt.status !== 'success'))) {
@@ -359,7 +483,7 @@ function SendForm({
         initial={{ opacity: 0, scale: 0.97 }}
         animate={{ opacity: 1, scale: 1 }}
         className="rounded-2xl p-6 text-center"
-        style={{ background: 'var(--surface)', border: '1px solid var(--border)' }}>
+        data-tc="">
         <div className="w-14 h-14 rounded-full flex items-center justify-center mx-auto mb-4"
           style={{ background: 'var(--success-bg)', color: 'var(--success)' }}>
           <Check size={28} />
@@ -404,7 +528,7 @@ function SendForm({
         initial={{ opacity: 0, y: 8 }}
         animate={{ opacity: 1, y: 0 }}
         className="rounded-2xl overflow-hidden"
-        style={{ background: 'var(--surface)', border: '1px solid var(--border)' }}>
+        data-tc="">
         <div className="flex items-center justify-between px-4 py-3" style={{ borderBottom: '1px solid var(--border)' }}>
           <h3 className="display font-semibold text-sm" style={{ color: 'var(--ink)' }}>Confirm Payment</h3>
           {!isProcessing && (
@@ -473,7 +597,7 @@ function SendForm({
   }
 
   return (
-    <div className="rounded-2xl overflow-hidden" style={{ background: 'var(--surface)', border: '1px solid var(--border)' }}>
+    <div className="rounded-2xl overflow-hidden" data-tc="">
       <div className="px-4 py-3" style={{ borderBottom: '1px solid var(--border)' }}>
         <h3 className="display font-semibold text-sm" style={{ color: 'var(--ink)' }}>Send USDC</h3>
       </div>
@@ -489,11 +613,7 @@ function SendForm({
             onChange={(e) => setRecipient(e.target.value.trim())}
             placeholder="0x..."
             className="w-full h-11 rounded-xl px-3 text-sm mono outline-none transition-shadow focus:ring-2 focus:ring-[var(--focus)]"
-            style={{
-              background: 'var(--surface-muted)',
-              border: '1px solid var(--border)',
-              color: 'var(--ink)',
-            }}
+            data-ti=""
           />
         </div>
 
@@ -516,11 +636,7 @@ function SendForm({
               min="0"
               step="0.01"
               className="w-full h-14 rounded-xl pl-4 pr-20 text-xl tabnum font-semibold outline-none transition-shadow focus:ring-2 focus:ring-[var(--focus)]"
-              style={{
-                background: 'var(--surface-muted)',
-                border: '1px solid var(--border)',
-                color: 'var(--ink)',
-              }}
+              data-ti=""
             />
             <div className="absolute right-3 top-1/2 -translate-y-1/2 flex items-center gap-2">
               <button
@@ -530,7 +646,7 @@ function SendForm({
                   setLocalError('')
                 }}
                 className="text-xs font-semibold px-2 py-1 rounded-lg transition-colors hover:opacity-80"
-                style={{ background: 'var(--accent)', color: '#fff' }}>
+                style={{ background: 'linear-gradient(135deg, var(--tone-from), var(--tone-to))', color: '#fff' }}>
                 MAX
               </button>
               <span className="text-sm font-medium" style={{ color: 'var(--muted)' }}>USDC</span>
@@ -544,7 +660,7 @@ function SendForm({
             {['1', '5', '10', '25'].map((v) => (
               <button key={v} onClick={() => setAmount(v)}
                 className="flex-1 h-8 rounded-lg text-xs font-medium transition-colors"
-                style={{ background: 'var(--surface-muted)', border: '1px solid var(--border)', color: 'var(--ink-2)' }}>
+                data-chip="">
                 ${v}
               </button>
             ))}
@@ -563,11 +679,7 @@ function SendForm({
             placeholder="What's this for?"
             maxLength={100}
             className="w-full h-11 rounded-xl px-3 text-sm outline-none transition-shadow focus:ring-2 focus:ring-[var(--focus)]"
-            style={{
-              background: 'var(--surface-muted)',
-              border: '1px solid var(--border)',
-              color: 'var(--ink)',
-            }}
+            data-ti=""
           />
         </div>
 
@@ -589,15 +701,8 @@ function SendForm({
 
 // ── Receive Card ────────────────────────────────────────────────────────────
 
-export function buildPayRequestUrl(address: string): string {
-  const base = typeof window !== 'undefined' ? window.location.origin : ''
-  return `${base}?pay=${address}`
-}
-
 function ReceiveCard({ address }: { address: string }) {
   const [copied, setCopied] = useState(false)
-  const [linkCopied, setLinkCopied] = useState(false)
-  const payLink = buildPayRequestUrl(address)
 
   function copy() {
     void copyText(address, 'Address copied').then((ok) => {
@@ -608,17 +713,8 @@ function ReceiveCard({ address }: { address: string }) {
     })
   }
 
-  function copyLink() {
-    void copyText(payLink, 'Payment link copied').then((ok) => {
-      if (ok) {
-        setLinkCopied(true)
-        setTimeout(() => setLinkCopied(false), 1500)
-      }
-    })
-  }
-
   return (
-    <div className="rounded-2xl overflow-hidden" style={{ background: 'var(--surface)', border: '1px solid var(--border)' }}>
+    <div className="rounded-2xl overflow-hidden" data-tc="">
       <div className="px-4 py-3" style={{ borderBottom: '1px solid var(--border)' }}>
         <h3 className="display font-semibold text-sm" style={{ color: 'var(--ink)' }}>Receive USDC</h3>
       </div>
@@ -637,7 +733,7 @@ function ReceiveCard({ address }: { address: string }) {
             Your Wallet Address
           </label>
           <div className="flex items-center gap-2 p-3 rounded-xl"
-            style={{ background: 'var(--surface-muted)', border: '1px solid var(--border)' }}>
+            data-tp="">
             <span className="mono text-xs flex-1 break-all" style={{ color: 'var(--ink-2)' }}>{address}</span>
             <button onClick={copy} className="p-1.5 rounded-lg transition-colors flex-shrink-0"
               style={{ background: 'var(--surface-strong)', color: copied ? 'var(--success)' : 'var(--muted)' }}>
@@ -647,20 +743,8 @@ function ReceiveCard({ address }: { address: string }) {
         </div>
 
         <div className="w-full">
-          <label className="text-xs font-semibold uppercase tracking-wider mb-1.5 block" style={{ color: 'var(--muted)' }}>
-            Payment Request Link
-          </label>
-          <div className="flex items-center gap-2 p-3 rounded-xl"
-            style={{ background: 'var(--surface-muted)', border: '1px solid var(--border)' }}>
-            <span className="text-xs flex-1 truncate" style={{ color: 'var(--ink-2)' }}>{payLink}</span>
-            <button onClick={copyLink} className="p-1.5 rounded-lg transition-colors flex-shrink-0"
-              style={{ background: 'var(--surface-strong)', color: linkCopied ? 'var(--success)' : 'var(--muted)' }}>
-              {linkCopied ? <Check size={14} /> : <Copy size={14} />}
-            </button>
-          </div>
-          <p className="text-xs mt-2" style={{ color: 'var(--subtle)' }}>
-            Share this link to let anyone send you USDC directly on Arc
-          </p>
+          <ShareLinkBox path={buildRequestPath(address)} label="Payment Request Link"
+            hint="Share this link to let anyone send you USDC directly on Arc" />
         </div>
       </div>
     </div>

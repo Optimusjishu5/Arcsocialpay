@@ -18,17 +18,23 @@ export function Avatar({ address, size = 36, className = '', showRing = false }:
 
   return (
     <div
-      className={`inline-flex items-center justify-center rounded-full select-none flex-shrink-0 font-semibold ${showRing ? 'ring-2 ring-white dark:ring-gray-800' : ''} ${className}`}
+      className={`inline-flex items-center justify-center rounded-full select-none flex-shrink-0 font-semibold overflow-hidden ${showRing ? 'ring-2 ring-white dark:ring-gray-800' : ''} ${className}`}
       style={{
         width: size,
         height: size,
-        background: color,
+        background: `linear-gradient(135deg, rgba(255,255,255,0.28) 0%, rgba(255,255,255,0) 60%), ${color}`,
+        boxShadow: `0 6px 14px -6px ${color}`,
         color: '#fff',
         fontSize,
         fontFamily: "'Space Grotesk', sans-serif",
       }}
     >
-      {initials}
+      {profile?.avatarUrl ? (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img src={profile.avatarUrl} alt="" className="w-full h-full rounded-full object-cover" draggable={false} />
+      ) : (
+        initials
+      )}
     </div>
   )
 }

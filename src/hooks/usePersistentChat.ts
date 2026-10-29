@@ -62,6 +62,7 @@ function toMessage(raw: unknown): Message | null {
           ? (m.reply_to_id as string)
           : undefined,
     paymentTx: (m.paymentTx ?? m.payment_tx ?? undefined) as Message['paymentTx'],
+    signature: typeof m.signature === 'string' ? m.signature : undefined,
   }
 }
 
@@ -176,6 +177,7 @@ export function usePersistentChat(address: string | undefined) {
                     status: m.status,
                     replyToId: m.replyToId,
                     paymentTx: m.paymentTx ?? null,
+                    signature: m.signature,
                   }),
                 }).catch(() => {
                   postedMsgs.current.delete(m.id)

@@ -31,3 +31,7 @@ export const NEXT_PUBLIC_ARC_RPC: string | undefined = parseHttpsUrlOrUndefined(
   typeof process !== 'undefined' ? process.env.NEXT_PUBLIC_ARC_RPC : undefined,
   'NEXT_PUBLIC_ARC_RPC',
 );
+
+/** Optional WalletConnect project id (free at cloud.reown.com). Enables the WalletConnect option when set. */
+export const NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID: string | undefined =
+  (typeof process !== 'undefined' ? process.env.NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID?.trim() : undefined) || undefined;

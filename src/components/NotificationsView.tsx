@@ -5,6 +5,7 @@ import { useArcAccount } from '../hooks/useArcWallet'
 import { appStore, useAppStore, filterNotificationsForAddress } from '../store/appStore'
 import { Avatar } from './ui/Avatar'
 import { EmptyState } from './ui/EmptyState'
+import { useSettings } from '../hooks/useSettings'
 import { formatTimestamp, formatAddress } from '../utils/format'
 import type { Notification } from '../types/index'
 
@@ -14,7 +15,8 @@ export function NotificationsView() {
 
   // Scope to current address (case-insensitive); store keeps all-local notifs
   // when no recipient field exists, so this is best-effort filtering.
-  const myNotifs = filterNotificationsForAddress(notifications, address)
+  const { filterNotifications } = useSettings()
+  const myNotifs = filterNotifications(filterNotificationsForAddress(notifications, address))
 
   useEffect(() => {
     if (isConnected) {

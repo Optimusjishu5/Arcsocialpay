@@ -57,6 +57,8 @@ export async function ensureChatSchema(): Promise<boolean> {
     `CREATE INDEX IF NOT EXISTS idx_messages_conv ON messages(conversation_id, created_at)`,
     `CREATE INDEX IF NOT EXISTS idx_conversations_created ON conversations(created_at DESC)`,
   ])
+  // Signed messages (EIP-712). Older databases lack the column; adding it twice errors, which is fine.
+  await db.execute(`ALTER TABLE messages ADD COLUMN signature TEXT`).catch(() => undefined)
   schemaEnsured = true
   return true
 }
@@ -80,6 +82,7 @@ export interface DbMessage {
   status: string
   replyToId?: string
   paymentTx?: Record<string, unknown> | null
+  signature?: string
 }
 
 function parseJson<T>(raw: unknown, fallback: T): T {
@@ -117,6 +120,7 @@ export async function listConversationsForAddress(address: string): Promise<DbCo
   return out
 }
 
+// Direct-chat participants are fixed when the conversation is created, so nobody can add themselves later.
 export async function upsertConversation(conv: DbConversation): Promise<void> {
   const db = getTursoClient()
   if (!db) return
@@ -125,7 +129,7 @@ export async function upsertConversation(conv: DbConversation): Promise<void> {
     sql: `INSERT INTO conversations (id, participants, created_at, is_group, group_id, last_message, unread_count)
           VALUES (?, ?, ?, ?, ?, ?, ?)
           ON CONFLICT(id) DO UPDATE SET
-            participants=excluded.participants,
+            participants=CASE WHEN conversations.is_group = 1 THEN excluded.participants ELSE conversations.participants END,
             last_message=excluded.last_message,
             unread_count=excluded.unread_count`,
     args: [
@@ -138,6 +142,24 @@ export async function upsertConversation(conv: DbConversation): Promise<void> {
       conv.unreadCount ?? 0,
     ],
   })
+}
+
+export async function getConversation(id: string): Promise<DbConversation | null> {
+  const db = getTursoClient()
+  if (!db) return null
+  await ensureChatSchema()
+  const rs = await db.execute({ sql: `SELECT * FROM conversations WHERE id = ?`, args: [id] })
+  const row = rs.rows[0]
+  if (!row) return null
+  return {
+    id: String(row.id),
+    participants: parseJson<string[]>(row.participants, []),
+    createdAt: Number(row.created_at),
+    isGroup: Number(row.is_group) === 1,
+    groupId: row.group_id ? String(row.group_id) : undefined,
+    lastMessage: parseJson(row.last_message, null),
+    unreadCount: Number(row.unread_count ?? 0),
+  }
 }
 
 export async function listMessages(conversationId: string, limit = 500): Promise<DbMessage[]> {
@@ -157,6 +179,7 @@ export async function listMessages(conversationId: string, limit = 500): Promise
     status: String(row.status ?? 'sent'),
     replyToId: row.reply_to_id ? String(row.reply_to_id) : undefined,
     paymentTx: parseJson(row.payment_tx, null),
+    signature: row.signature ? String(row.signature) : undefined,
   }))
 }
 
@@ -165,12 +188,11 @@ export async function insertMessage(msg: DbMessage): Promise<void> {
   if (!db) return
   await ensureChatSchema()
   await db.execute({
-    sql: `INSERT INTO messages (id, conversation_id, sender_address, content, created_at, status, reply_to_id, payment_tx)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    // Existing rows are never overwritten: a stored message cannot be edited by re-posting its id.
+    sql: `INSERT INTO messages (id, conversation_id, sender_address, content, created_at, status, reply_to_id, payment_tx, signature)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
           ON CONFLICT(id) DO UPDATE SET
-            content=excluded.content,
-            status=excluded.status,
-            payment_tx=excluded.payment_tx`,
+            status=excluded.status`,
     args: [
       msg.id,
       msg.conversationId,
@@ -180,6 +202,7 @@ export async function insertMessage(msg: DbMessage): Promise<void> {
       msg.status,
       msg.replyToId ?? null,
       msg.paymentTx ? JSON.stringify(msg.paymentTx) : null,
+      msg.signature ?? null,
     ],
   })
   // Keep conversation last_message in sync
@@ -273,6 +296,14 @@ export async function ensureSocialSchema(): Promise<boolean> {
     `CREATE INDEX IF NOT EXISTS idx_posts_created ON posts(created_at DESC)`,
     `CREATE INDEX IF NOT EXISTS idx_comments_post ON comments(post_id, created_at)`,
   ])
+  // Profile picture and color were added later: add the columns once, ignore if they exist.
+  for (const col of ['avatar_url', 'accent']) {
+    try {
+      await db.execute(`ALTER TABLE profiles ADD COLUMN ${col} TEXT NOT NULL DEFAULT ''`)
+    } catch {
+      /* column already exists */
+    }
+  }
   socialSchemaEnsured = true
   return true
 }
@@ -304,6 +335,8 @@ export interface DbProfile {
   username: string
   bio: string
   avatarSeed: string
+  avatarUrl?: string
+  accent?: string
   followerCount: number
   followingCount: number
   createdAt: number
@@ -422,6 +455,8 @@ export async function listProfiles(limit = 500): Promise<DbProfile[]> {
     username: String(row.username ?? ''),
     bio: String(row.bio ?? ''),
     avatarSeed: String(row.avatar_seed ?? ''),
+    avatarUrl: String(row.avatar_url ?? ''),
+    accent: String(row.accent ?? ''),
     followerCount: Number(row.follower_count ?? 0),
     followingCount: Number(row.following_count ?? 0),
     createdAt: Number(row.created_at),
@@ -436,9 +471,6 @@ export async function upsertProfile(profile: DbProfile): Promise<void> {
     sql: `INSERT INTO profiles (address, username, bio, avatar_seed, follower_count, following_count, created_at)
           VALUES (?, ?, ?, ?, ?, ?, ?)
           ON CONFLICT(address) DO UPDATE SET
-            username=excluded.username,
-            bio=excluded.bio,
-            avatar_seed=excluded.avatar_seed,
             follower_count=excluded.follower_count,
             following_count=excluded.following_count`,
     args: [
@@ -450,6 +482,41 @@ export async function upsertProfile(profile: DbProfile): Promise<void> {
       profile.followingCount ?? 0,
       profile.createdAt,
     ],
+  })
+}
+
+/** True when another address already uses this username (case-insensitive). */
+export async function isUsernameTaken(username: string, address: string): Promise<boolean> {
+  const db = getTursoClient()
+  if (!db) return false
+  await ensureSocialSchema()
+  const rs = await db.execute({
+    sql: `SELECT 1 FROM profiles WHERE lower(username) = lower(?) AND lower(address) != lower(?) LIMIT 1`,
+    args: [username, address],
+  })
+  return rs.rows.length > 0
+}
+
+/** Signed profile edit: the only way to change name, bio, picture or color on the server. */
+export async function updateProfileIdentity(p: {
+  address: string
+  username: string
+  bio: string
+  avatarUrl: string
+  accent: string
+}): Promise<void> {
+  const db = getTursoClient()
+  if (!db) return
+  await ensureSocialSchema()
+  await db.execute({
+    sql: `INSERT INTO profiles (address, username, bio, avatar_seed, avatar_url, accent, created_at)
+          VALUES (?, ?, ?, ?, ?, ?, ?)
+          ON CONFLICT(address) DO UPDATE SET
+            username=excluded.username,
+            bio=excluded.bio,
+            avatar_url=excluded.avatar_url,
+            accent=excluded.accent`,
+    args: [p.address, p.username, p.bio, p.address, p.avatarUrl, p.accent, Date.now()],
   })
 }
 
@@ -480,6 +547,14 @@ export async function ensureTxSchema(): Promise<boolean> {
     )`,
     `CREATE INDEX IF NOT EXISTS idx_tx_records_parties ON tx_records(from_address, to_address, timestamp DESC)`,
   ])
+  // Swap and bridge entries were added later: add the columns once, ignore if they exist.
+  for (const col of ['kind', 'summary', 'symbol']) {
+    try {
+      await db.execute(`ALTER TABLE tx_records ADD COLUMN ${col} TEXT`)
+    } catch {
+      /* column already exists */
+    }
+  }
   txSchemaEnsured = true
   return true
 }
@@ -496,6 +571,9 @@ export interface DbTxRecord {
   timestamp: number
   note?: string
   blockNumber?: number
+  kind?: string
+  summary?: string
+  symbol?: string
 }
 
 export async function listTxRecords(address: string, limit = 200): Promise<DbTxRecord[]> {
@@ -521,6 +599,9 @@ export async function listTxRecords(address: string, limit = 200): Promise<DbTxR
     timestamp: Number(row.timestamp),
     note: row.note != null ? String(row.note) : undefined,
     blockNumber: row.block_number != null ? Number(row.block_number) : undefined,
+    kind: row.kind != null ? String(row.kind) : undefined,
+    summary: row.summary != null ? String(row.summary) : undefined,
+    symbol: row.symbol != null ? String(row.symbol) : undefined,
   }))
 }
 
@@ -529,12 +610,15 @@ export async function upsertTxRecord(tx: DbTxRecord): Promise<void> {
   if (!db) return
   await ensureTxSchema()
   await db.execute({
-    sql: `INSERT INTO tx_records (tx_hash, id, chain_id, direction, amount, from_address, to_address, status, timestamp, note, block_number)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    sql: `INSERT INTO tx_records (tx_hash, id, chain_id, direction, amount, from_address, to_address, status, timestamp, note, block_number, kind, summary, symbol)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
           ON CONFLICT(tx_hash) DO UPDATE SET
             status=excluded.status,
             note=excluded.note,
-            block_number=excluded.block_number`,
+            block_number=excluded.block_number,
+            kind=COALESCE(excluded.kind, tx_records.kind),
+            summary=COALESCE(excluded.summary, tx_records.summary),
+            symbol=COALESCE(excluded.symbol, tx_records.symbol)`,
     args: [
       tx.txHash,
       tx.id,
@@ -547,6 +631,9 @@ export async function upsertTxRecord(tx: DbTxRecord): Promise<void> {
       tx.timestamp,
       tx.note ?? null,
       tx.blockNumber ?? null,
+      tx.kind ?? null,
+      tx.summary ?? null,
+      tx.symbol ?? null,
     ],
   })
 }

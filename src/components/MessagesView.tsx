@@ -3,13 +3,15 @@ import { toast } from 'sonner'
 import { motion, AnimatePresence } from 'framer-motion'
 import {
   Search, Plus, Send, ArrowLeft, Reply, Trash2, DollarSign, X,
-  Check, CheckCheck, Clock, AlertCircle, MoreHorizontal
+  Check, CheckCheck, Clock, AlertCircle, MoreHorizontal, MessageSquare
 } from 'lucide-react'
 import { isAddress } from 'viem'
 import { useWaitForTransactionReceipt } from 'wagmi'
 import { ConnectKitButton } from 'connectkit'
 import { useArcAccount, useUsdcBalance, useSendUsdc, ARC_CHAIN_ID, USDC_ADDRESS } from '../hooks/useArcWallet'
 import { useSocialPay } from '../hooks/useSocialPay'
+import { useChatSigning } from '../hooks/useChatSigning'
+import { GradientIcon, toneStyle, toneVars } from './dashboard/ui'
 import { appStore, useAppStore } from '../store/appStore'
 import { Avatar } from './ui/Avatar'
 import { Button } from './ui/Button'
@@ -64,23 +66,26 @@ export function MessagesView({ initialConvId }: Props) {
   const showChat = !!activeConvId
 
   return (
-    <div className="flex h-[calc(100dvh-60px)] overflow-hidden">
+    <div className="tone-scope flex h-[calc(100dvh-60px)] overflow-hidden" style={toneVars('violet')}>
       {/* Conversation List */}
       <div className={`flex flex-col border-r ${showChat ? 'hidden md:flex' : 'flex'} w-full md:w-80 flex-shrink-0`}
         style={{ borderColor: 'var(--border)', background: 'var(--surface)' }}>
         {/* Header */}
         <div className="flex items-center justify-between px-4 py-3" style={{ borderBottom: '1px solid var(--border)' }}>
-          <h2 className="display font-semibold text-base" style={{ color: 'var(--ink)' }}>Messages</h2>
-          <button onClick={() => setShowNewChat(true)}
-            className="w-8 h-8 rounded-lg flex items-center justify-center transition-colors hover:bg-[var(--surface-muted)]"
-            style={{ color: 'var(--accent)' }}>
+          <div className="flex items-center gap-2.5">
+            <GradientIcon icon={MessageSquare} tone="violet" size={32} />
+            <h2 className="display font-semibold text-base" style={{ color: 'var(--ink)' }}>Messages</h2>
+          </div>
+          <button onClick={() => setShowNewChat(true)} aria-label="New chat"
+            className="w-9 h-9 rounded-full flex items-center justify-center transition-transform active:scale-95 hover:-translate-y-0.5"
+            style={toneStyle('pink')}>
             <Plus size={18} />
           </button>
         </div>
         {/* Search */}
         <div className="px-3 py-2">
           <div className="flex items-center gap-2 h-9 px-3 rounded-xl"
-            style={{ background: 'var(--surface-muted)', border: '1px solid var(--border)' }}>
+            data-tp="">
             <Search size={14} style={{ color: 'var(--subtle)' }} />
             <input
               type="text"
@@ -101,10 +106,7 @@ export function MessagesView({ initialConvId }: Props) {
         <div className="flex-1 overflow-y-auto">
           {myConvs.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-12 gap-3">
-              <div className="w-12 h-12 rounded-2xl flex items-center justify-center"
-                style={{ background: 'var(--surface-muted)', color: 'var(--muted)' }}>
-                <Send size={20} />
-              </div>
+              <GradientIcon icon={Send} tone="violet" size={52} />
               <p className="text-sm font-medium" style={{ color: 'var(--muted)' }}>No conversations yet</p>
               <Button size="sm" onClick={() => setShowNewChat(true)}>Start a chat</Button>
             </div>
@@ -134,10 +136,7 @@ export function MessagesView({ initialConvId }: Props) {
         ) : (
           <div className="flex-1 hidden md:flex flex-col items-center justify-center gap-3"
             style={{ background: 'var(--bg)' }}>
-            <div className="w-16 h-16 rounded-2xl flex items-center justify-center"
-              style={{ background: 'var(--surface-muted)', color: 'var(--muted)' }}>
-              <Send size={28} />
-            </div>
+            <GradientIcon icon={MessageSquare} tone="violet" size={68} />
             <p className="font-medium" style={{ color: 'var(--muted)' }}>Select a conversation</p>
           </div>
         )}
@@ -192,7 +191,7 @@ function ConvItem({ conv, myAddress, isActive, onClick }: {
       </div>
       {conv.unreadCount > 0 && (
         <span className="w-5 h-5 rounded-full text-xs font-bold flex items-center justify-center flex-shrink-0"
-          style={{ background: 'var(--accent)', color: '#fff' }}>
+          style={toneStyle('pink')}>
           {conv.unreadCount > 9 ? '9+' : conv.unreadCount}
         </span>
       )}
@@ -212,6 +211,8 @@ function ChatPanel({ conv, myAddress, messages, onBack }: {
   const [input, setInput] = useState('')
   const [replyTo, setReplyTo] = useState<Message | null>(null)
   const [showPayModal, setShowPayModal] = useState(false)
+  const [sending, setSending] = useState(false)
+  const chatSigning = useChatSigning()
   const bottomRef = useRef<HTMLDivElement>(null)
   const scrollRef = useRef<HTMLDivElement>(null)
 
@@ -231,12 +232,24 @@ function ChatPanel({ conv, myAddress, messages, onBack }: {
     })
   }, [messages.length])
 
-  function sendMessage() {
+  async function sendMessage() {
     const text = input.trim()
-    if (!text) return
-    appStore.sendMessage(conv.id, myAddress, text, replyTo?.id)
-    setInput('')
-    setReplyTo(null)
+    if (!text || sending) return
+    setSending(true)
+    try {
+      // With server history on, the wallet signs each message so nobody can post as you.
+      const signed = chatSigning.required
+        ? await chatSigning.sign({ conversationId: conv.id, sender: myAddress, content: text, replyToId: replyTo?.id })
+        : undefined
+      appStore.sendMessage(conv.id, myAddress, text, replyTo?.id, undefined, signed)
+      setInput('')
+      setReplyTo(null)
+    } catch (e) {
+      const msg = String((e as { message?: string })?.message ?? '').toLowerCase()
+      toast.error(msg.includes('reject') || msg.includes('denied') ? 'Signature cancelled. Message not sent.' : 'Could not sign the message. Please try again.')
+    } finally {
+      setSending(false)
+    }
   }
 
   function deleteMsg(id: string) {
@@ -263,9 +276,9 @@ function ChatPanel({ conv, myAddress, messages, onBack }: {
         </div>
         <button
           onClick={() => setShowPayModal(true)}
-          className="flex items-center gap-1.5 h-8 px-3 rounded-xl text-xs font-semibold transition-all"
-          style={{ background: 'var(--accent)', color: '#fff' }}>
-          <DollarSign size={13} />
+          className="flex items-center gap-1.5 h-9 px-3.5 rounded-xl text-xs font-semibold transition-all active:scale-95 hover:-translate-y-0.5"
+          style={toneStyle('green')}>
+          <DollarSign size={14} />
           Pay
         </button>
       </div>
@@ -306,12 +319,12 @@ function ChatPanel({ conv, myAddress, messages, onBack }: {
       <div className="flex items-end gap-2 px-4 py-3 flex-shrink-0"
         style={{ borderTop: '1px solid var(--border)', background: 'var(--surface)' }}>
         <div className="flex-1 rounded-2xl px-4 py-2 min-h-[44px] max-h-28 overflow-hidden"
-          style={{ background: 'var(--surface-muted)', border: '1px solid var(--border)' }}>
+          data-tp="">
           <textarea
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={(e) => {
-              if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage() }
+              if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); void sendMessage() }
             }}
             placeholder="Message..."
             rows={1}
@@ -320,13 +333,18 @@ function ChatPanel({ conv, myAddress, messages, onBack }: {
           />
         </div>
         <button
-          onClick={sendMessage}
-          disabled={!input.trim()}
+          onClick={() => void sendMessage()}
+          disabled={!input.trim() || sending}
           className="w-11 h-11 rounded-full flex items-center justify-center flex-shrink-0 transition-all disabled:opacity-40 active:scale-95"
-          style={{ background: 'var(--accent)', color: '#fff' }}>
+          style={toneStyle('violet')}>
           <Send size={18} />
         </button>
       </div>
+      {chatSigning.required && (
+        <p className="px-4 pb-2 text-xs flex-shrink-0" style={{ color: 'var(--subtle)', background: 'var(--surface)' }}>
+          Messages are signed with your wallet so they can be verified as yours.
+        </p>
+      )}
 
       {/* In-chat pay modal */}
       <InChatPayModal
@@ -380,7 +398,7 @@ function MessageBubble({ msg, isMine, allMessages, onReply, onDelete }: {
             <div
               className="px-3 py-2 rounded-2xl relative"
               style={{
-                background: isMine ? 'var(--accent)' : 'var(--surface-strong)',
+                background: isMine ? 'linear-gradient(135deg, var(--tone-from), var(--tone-to))' : 'var(--surface-strong)',
                 border: isMine ? 'none' : '1px solid var(--border)',
               }}
             >
@@ -593,7 +611,7 @@ function InChatPayModal({ open, onClose, convId, myAddress, recipient }: {
             step="0.01"
             disabled={isPending || isConfirming}
             className="w-full h-12 rounded-xl px-4 text-xl tabnum font-bold outline-none focus:ring-2 focus:ring-[var(--focus)]"
-            style={{ background: 'var(--surface-muted)', border: '1px solid var(--border)', color: 'var(--ink)' }}
+            data-ti=""
           />
         </div>
         {errMsg && (
@@ -648,7 +666,7 @@ function NewChatModal({ open, onClose, myAddress, onCreated }: {
           onChange={(e) => setAddr(e.target.value.trim())}
           placeholder="Wallet address (0x...)"
           className="w-full h-11 rounded-xl px-3 text-sm mono outline-none focus:ring-2 focus:ring-[var(--focus)]"
-          style={{ background: 'var(--surface-muted)', border: '1px solid var(--border)', color: 'var(--ink)' }}
+          data-ti=""
         />
         {err && <p className="text-sm" style={{ color: 'var(--danger)' }}>{err}</p>}
         <Button className="w-full" onClick={start}>Start Chat</Button>

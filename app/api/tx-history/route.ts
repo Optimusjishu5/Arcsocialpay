@@ -48,6 +48,9 @@ export async function POST(req: Request) {
       timestamp?: number
       note?: string
       blockNumber?: number
+      kind?: string
+      summary?: string
+      symbol?: string
     }
     if (!body?.txHash) {
       return NextResponse.json({ error: 'txHash required' }, { status: 400 })
@@ -64,6 +67,9 @@ export async function POST(req: Request) {
       timestamp: body.timestamp ?? Date.now(),
       note: body.note,
       blockNumber: body.blockNumber,
+      kind: ['payment', 'swap', 'bridge'].includes(body.kind ?? '') ? body.kind : undefined,
+      summary: typeof body.summary === 'string' ? body.summary.slice(0, 200) : undefined,
+      symbol: typeof body.symbol === 'string' ? body.symbol.slice(0, 12) : undefined,
     })
     return NextResponse.json({ ok: true })
   } catch (e) {

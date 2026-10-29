@@ -458,6 +458,8 @@ export const appStore = {
     content: string,
     replyToId?: string,
     paymentTx?: PaymentMessage,
+    // Pre-signed messages carry the id/timestamp/signature the wallet signed.
+    signed?: { id: string; createdAt: number; signature: string },
   ): Message | null {
     const sender = normalizeAddress(senderAddress)
     const conv = globalState.conversations.find((c) => c.id === conversationId)
@@ -477,14 +479,15 @@ export const appStore = {
       if (!isParticipant) return null
     }
     const msg: Message = {
-      id: generateId(),
+      id: signed?.id ?? generateId(),
       conversationId,
       senderAddress: sender,
       content,
-      createdAt: Date.now(),
+      createdAt: signed?.createdAt ?? Date.now(),
       status: 'sent',
       replyToId,
       paymentTx,
+      signature: signed?.signature,
     }
     setState((s) => ({
       ...s,
@@ -1008,6 +1011,8 @@ export const appStore = {
           username: typeof p.username === 'string' ? p.username : '',
           bio: typeof p.bio === 'string' ? p.bio : '',
           avatarSeed: typeof p.avatarSeed === 'string' ? p.avatarSeed : key,
+          avatarUrl: typeof p.avatarUrl === 'string' ? p.avatarUrl : '',
+          accent: typeof p.accent === 'string' ? p.accent : '',
           followerCount: typeof p.followerCount === 'number' ? p.followerCount : 0,
           followingCount: typeof p.followingCount === 'number' ? p.followingCount : 0,
           createdAt: typeof p.createdAt === 'number' ? p.createdAt : Date.now(),
@@ -1025,6 +1030,30 @@ export const appStore = {
   // ── Turso import for payment history ──────────────────────────────────────
   // Merge by txHash (case-insensitive); server wins per hash so
   // pending → confirmed transitions converge across devices.
+  /** Adds records found on the chain that this browser doesn't know yet. Existing entries are never changed. */
+  mergeTxRecords(records: Omit<TxRecord, 'id'>[]): number {
+    if (!Array.isArray(records) || records.length === 0) return 0
+    const known = new Set(globalState.txHistory.map((t) => t.txHash.toLowerCase()))
+    const fresh: TxRecord[] = []
+    for (const r of records) {
+      const needle = r.txHash.toLowerCase()
+      if (known.has(needle)) continue
+      known.add(needle)
+      fresh.push({
+        ...r,
+        fromAddress: normalizeAddress(r.fromAddress),
+        toAddress: normalizeAddress(r.toAddress),
+        id: generateId(),
+      })
+    }
+    if (fresh.length === 0) return 0
+    setState((s) => ({
+      ...s,
+      txHistory: [...s.txHistory, ...fresh].sort((a, b) => b.timestamp - a.timestamp),
+    }))
+    return fresh.length
+  },
+
   importTxRecords(records: TxRecord[], postedHashes?: Set<string>) {
     if (!Array.isArray(records)) return
     const postedLower = new Set([...(postedHashes ?? [])].map((h) => h.toLowerCase()))

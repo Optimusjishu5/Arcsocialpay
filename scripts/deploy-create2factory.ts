@@ -1,4 +1,5 @@
-import { ethers, network } from "hardhat";
+import hre from "hardhat";
+const { ethers, network } = hre;
 import type { BaseContract } from "ethers";
 
 /**
