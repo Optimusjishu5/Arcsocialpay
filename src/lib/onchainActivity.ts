@@ -143,27 +143,36 @@ function errText(e: unknown): string {
   return String((e as Error)?.message ?? e) + String((e as { details?: string })?.details ?? '')
 }
 
-// The Arc RPC allows only about 3 log queries per second (bursts of 16 were rejected when
-// measured), so requests are started one at a time with a short gap between them.
-const REQUEST_GAP_MS = 340
+// Measured on Arc's public RPC: a burst of roughly 60 requests is accepted, then about one
+// request every two seconds (the limit refills slowly). Requests start one at a time and the
+// gap below widens whenever the RPC says "rate limit", so a long scan settles at the real pace.
+const MIN_GAP_MS = 340
+const MAX_GAP_MS = 2_000
+// The gap adapts: every "rate limit" answer widens it, every success narrows it again,
+// so a long scan settles at the pace the RPC really allows instead of failing midway.
+let gapMs = MIN_GAP_MS
 let nextStart = 0
 async function withSlot<T>(fn: () => Promise<T>): Promise<T> {
   const now = Date.now()
   const startAt = Math.max(now, nextStart)
-  nextStart = startAt + REQUEST_GAP_MS
+  nextStart = startAt + gapMs
   if (startAt > now) await new Promise((r) => setTimeout(r, startAt - now))
   return fn()
 }
 
 async function rpc<T>(fn: () => Promise<T>): Promise<T> {
   let lastError: unknown
-  for (let attempt = 0; attempt < 6; attempt++) {
+  for (let attempt = 0; attempt < 8; attempt++) {
     try {
-      return await withSlot(fn)
+      const result = await withSlot(fn)
+      gapMs = Math.max(MIN_GAP_MS, gapMs * 0.97)
+      return result
     } catch (e) {
       lastError = e
       if (isTooBig(e)) throw e // the caller splits the window instead of retrying the same one
-      await new Promise((r) => setTimeout(r, (isRateLimited(e) ? 800 : 300) * 2 ** attempt))
+      if (isRateLimited(e)) gapMs = Math.min(MAX_GAP_MS, gapMs * 1.6)
+      // A rate limit refills slowly, so wait for it instead of burning attempts.
+      await new Promise((r) => setTimeout(r, isRateLimited(e) ? 2_000 * (attempt + 1) : 300 * 2 ** attempt))
     }
   }
   throw lastError

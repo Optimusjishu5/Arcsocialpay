@@ -127,7 +127,7 @@ function saveState(state: AppState): void {
   tryPersist(state)
 }
 
-const TX_HISTORY_CAP = 200
+const TX_HISTORY_CAP = 1000
 const MESSAGES_PER_CONV_CAP = 500
 const SAVE_DEBOUNCE_MS = 200
 

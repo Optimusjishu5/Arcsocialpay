@@ -243,7 +243,7 @@ export function PayView({ initialMode = 'send', initialRecipient, initialAmount,
         </div>
         {myTxs.length === 0 ? (
           <p className="px-4 py-8 text-center text-sm" style={{ color: 'var(--muted)' }}>
-            {chain.scanning ? 'Looking for your payments, swaps and bridges...' : `No payments, swaps or bridges found in the last ${chain.daysCovered || 2} days. Open Activity and tap Load older to look further back.`}
+            {chain.scanning ? 'Looking for your payments, swaps and bridges...' : `No payments, swaps or bridges found in the last ${chain.daysCovered || 2} days. Open Activity to see older history load in the background.`}
           </p>
         ) : (
           <div className="divide-y" style={{ borderColor: 'var(--border)' }}>

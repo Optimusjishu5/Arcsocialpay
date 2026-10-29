@@ -2,12 +2,12 @@ import { useState } from 'react'
 import { motion } from 'framer-motion'
 import {
   ArrowDownLeft, ArrowLeftRight, ArrowUpRight, Activity, Compass, ExternalLink, HandCoins, Layers,
-  MessageCircle, Send, Sparkles, Users, CalendarClock, Wallet, Waypoints,
+  Heart, MessageCircle, Send, Sparkles, Users, CalendarClock, Wallet, Waypoints,
 } from 'lucide-react'
 import { ConnectKitButton } from 'connectkit'
 import { TokenUSDC } from '@web3icons/react'
 import { useArcAccount, useUsdcBalance, ARC_CHAIN_ID } from '../hooks/useArcWallet'
-import { useAppStore, filterTxHistoryForAddress, filterConversationsForAddress, isSameAddress } from '../store/appStore'
+import { appStore, useAppStore, filterTxHistoryForAddress, filterConversationsForAddress, isSameAddress } from '../store/appStore'
 import { useTxReconciliationOnLoad, useUsdcTransferWatcher, useBackfillMissingTxRecords } from '../hooks/useTxHistory'
 import { Avatar } from './ui/Avatar'
 import { TxStatusBadge } from './ui/TxStatusBadge'
@@ -52,7 +52,8 @@ export function Dashboard({ onNavigate }: Props) {
   const receivedTotal = totalRaw(confirmed.filter((t) => !isSameAddress(t.fromAddress, address)))
   const recentConvs = filterConversationsForAddress(conversations, address).slice(0, 3)
   const unread = filterConversationsForAddress(conversations, address).reduce((n, c) => n + (c.unreadCount ?? 0), 0)
-  const recentPosts = posts.slice(0, 3)
+  // Newest first, whatever order the list was merged in (own posts, other devices, the server).
+  const recentPosts = [...posts].sort((a, b) => b.createdAt - a.createdAt).slice(0, 3)
 
   function copyAddress() {
     if (!address) return
@@ -170,9 +171,13 @@ export function Dashboard({ onNavigate }: Props) {
                   <Avatar address={post.authorAddress} size={36} />
                   <div className="flex-1 min-w-0">
                     <div className="text-xs font-medium mb-0.5" style={{ color: 'var(--muted)' }}>
-                      {formatAddress(post.authorAddress)} · {formatTimestamp(post.createdAt)}
+                      {isSameAddress(post.authorAddress, address) ? 'You' : (appStore.getProfile(post.authorAddress)?.username || formatAddress(post.authorAddress))} · {formatTimestamp(post.createdAt)}
                     </div>
-                    <p className="text-sm line-clamp-2" style={{ color: 'var(--ink-2)' }}>{post.content}</p>
+                    <p className="text-sm line-clamp-2 break-words" style={{ color: 'var(--ink-2)' }}>{post.content}</p>
+                    <div className="flex items-center gap-3 mt-1 text-[11px] tabnum" style={{ color: 'var(--subtle)' }}>
+                      <span className="inline-flex items-center gap-1"><Heart size={11} /> {post.likes.length}</span>
+                      <span className="inline-flex items-center gap-1"><MessageCircle size={11} /> {post.commentCount}</span>
+                    </div>
                   </div>
                 </button>
               ))

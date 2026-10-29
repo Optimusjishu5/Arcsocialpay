@@ -1,99 +1,116 @@
 'use client'
 
-import { useMemo, useState } from 'react'
-import {
-  ArrowDownLeft, ArrowUpRight, ExternalLink, FileText, Heart, MessageCircle, Repeat2, UserPlus, DollarSign, AtSign,
-  Activity as ActivityIcon,
-} from 'lucide-react'
-import type { LucideIcon } from 'lucide-react'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { motion } from 'framer-motion'
+import { Activity as ActivityIcon, ArrowDownLeft, ArrowUpRight, Download, Search, X } from 'lucide-react'
 import { ConnectKitButton } from 'connectkit'
 import { useArcAccount } from '../hooks/useArcWallet'
 import { useAppStore } from '../store/appStore'
 import { useSettings } from '../hooks/useSettings'
-import { EmptyState } from './ui/EmptyState'
-import { TxStatusBadge } from './ui/TxStatusBadge'
-import { formatAddress, formatTimestamp, isSameAddress } from '../utils/format'
-import type { NotifType } from '../types/index'
-import { describeTx, txUrl } from '../utils/txPresentation'
 import { useOnchainStatus } from '../hooks/useOnchainActivity'
+import { EmptyState } from './ui/EmptyState'
 import { Button } from './ui/Button'
+import { StatCard, glassCard } from './dashboard/ui'
+import { ActivityRow } from './activity/ActivityRow'
+import { SyncStatus } from './activity/SyncStatus'
+import { FILTERS, buildEntries, groupByDay, matchesQuery, toCsv, type Filter } from './activity/entries'
+import { formatUsdcDisplay, isSameAddress } from '../utils/format'
+import { parseUsdc } from '@/onchain-money'
 
-type Filter = 'all' | 'payments' | 'swaps' | 'bridges' | 'social'
+const PAGE = 40
 
-interface Entry {
-  id: string
-  kind: 'payment' | 'swap' | 'bridge' | 'social'
-  at: number
-  icon: LucideIcon
-  title: string
-  detail?: string
-  amount?: { text: string; sign: '+' | '-' }
-  status?: 'pending' | 'confirmed' | 'failed'
-  txHash?: string
-  url?: string
+function RowsSkeleton() {
+  return (
+    <div className="rounded-3xl p-2" style={glassCard} aria-hidden>
+      {Array.from({ length: 5 }).map((_, i) => (
+        <div key={i} className="flex items-center gap-3 p-3 animate-pulse">
+          <div className="w-10 h-10 rounded-xl" style={{ background: 'var(--surface-muted)' }} />
+          <div className="flex-1 space-y-2">
+            <div className="h-3 w-24 rounded" style={{ background: 'var(--surface-muted)' }} />
+            <div className="h-2.5 w-40 rounded" style={{ background: 'var(--surface-muted)' }} />
+          </div>
+          <div className="h-3 w-16 rounded" style={{ background: 'var(--surface-muted)' }} />
+        </div>
+      ))}
+    </div>
+  )
 }
-
-const NOTIF_ICON: Record<NotifType, LucideIcon> = {
-  like: Heart, comment: MessageCircle, repost: Repeat2, follow: UserPlus,
-  payment: DollarSign, mention: AtSign, message: MessageCircle,
-}
-
-const NOTIF_TEXT: Record<NotifType, string> = {
-  like: 'liked your post', comment: 'commented on your post', repost: 'reposted you',
-  follow: 'started following you', payment: 'paid you', mention: 'mentioned you', message: 'sent you a message',
-}
-
-const preview = (s: string, n = 80) => (s.length > n ? `${s.slice(0, n)}...` : s)
 
 export function ActivityView() {
   const { address, isConnected } = useArcAccount()
   const { txHistory, posts, comments, notifications } = useAppStore()
   const { filterNotifications } = useSettings()
-  const [filter, setFilter] = useState<Filter>('all')
   const chain = useOnchainStatus()
+  const [filter, setFilter] = useState<Filter>('all')
+  const [query, setQuery] = useState('')
+  const [page, setPage] = useState({ key: '', count: PAGE })
+  const sentinel = useRef<HTMLDivElement>(null)
 
-  const entries = useMemo<Entry[]>(() => {
-    if (!address) return []
-    const list: Entry[] = []
-    for (const t of txHistory) {
-      if (!isSameAddress(t.fromAddress, address) && !isSameAddress(t.toAddress, address)) continue
-      const v = describeTx(t, address)
-      list.push({
-        id: `tx-${t.id}`, kind: v.kind, at: t.timestamp, icon: v.icon,
-        title: v.title, detail: v.detail,
-        amount: v.amountText ? { text: v.amountText, sign: v.sign === '-' ? '-' : '+' } : undefined,
-        status: t.status, txHash: t.txHash, url: txUrl(t),
-      })
-    }
-    for (const p of posts) {
-      if (!isSameAddress(p.authorAddress, address)) continue
-      list.push({
-        id: `post-${p.id}`, kind: 'social', at: p.createdAt, icon: FileText,
-        title: p.repostOf ? 'You reposted' : 'You posted', detail: preview(p.content),
-      })
-    }
-    for (const p of posts) {
-      if (isSameAddress(p.authorAddress, address)) continue
-      if (p.likes.some((a) => isSameAddress(a, address))) {
-        list.push({ id: `like-${p.id}`, kind: 'social', at: p.createdAt, icon: Heart, title: 'You liked a post', detail: preview(p.content) })
-      }
-    }
-    for (const c of comments) {
-      if (!isSameAddress(c.authorAddress, address)) continue
-      list.push({ id: `comment-${c.id}`, kind: 'social', at: c.createdAt, icon: MessageCircle, title: 'You commented', detail: preview(c.content) })
-    }
-    for (const n of filterNotifications(notifications)) {
-      // Payment notifications duplicate the onchain record above.
-      if (n.type === 'payment') continue
-      list.push({
-        id: `notif-${n.id}`, kind: 'social', at: n.createdAt, icon: NOTIF_ICON[n.type],
-        title: `${formatAddress(n.fromAddress)} ${NOTIF_TEXT[n.type]}`, detail: n.content ? preview(n.content) : undefined,
-      })
-    }
-    return list.sort((a, b) => b.at - a.at)
-  }, [address, txHistory, posts, comments, notifications, filterNotifications])
+  const entries = useMemo(
+    () => (address ? buildEntries({ address, txHistory, posts, comments, notifications: filterNotifications(notifications) }) : []),
+    [address, txHistory, posts, comments, notifications, filterNotifications],
+  )
 
-  const shown = entries.filter((e) => filter === 'all' || e.kind === ({ payments: 'payment', swaps: 'swap', bridges: 'bridge', social: 'social' } as const)[filter])
+  const counts = useMemo(() => {
+    const c: Record<Filter, number> = { all: entries.length, payments: 0, swaps: 0, bridges: 0, social: 0 }
+    for (const e of entries) {
+      if (e.kind === 'payment') c.payments++
+      else if (e.kind === 'swap') c.swaps++
+      else if (e.kind === 'bridge') c.bridges++
+      else c.social++
+    }
+    return c
+  }, [entries])
+
+  const totals = useMemo(() => {
+    let received = 0n
+    let sent = 0n
+    for (const e of entries) {
+      const t = e.tx
+      if (!t || e.kind !== 'payment' || t.status !== 'confirmed' || (t.symbol && t.symbol !== 'USDC')) continue
+      try {
+        const raw = parseUsdc(t.amount)
+        if (isSameAddress(t.fromAddress, address)) sent += raw
+        else received += raw
+      } catch { /* skip malformed legacy rows */ }
+    }
+    return { received, sent }
+  }, [entries, address])
+
+  const shown = useMemo(() => {
+    const kind = FILTERS.find((f) => f.id === filter)?.kind
+    const q = query.trim()
+    return entries.filter((e) => (!kind || e.kind === kind) && matchesQuery(e, q))
+  }, [entries, filter, query])
+
+  // The page size resets whenever the filter, search or wallet changes.
+  const pageKey = `${filter}|${query}|${address ?? ''}`
+  const visible = page.key === pageKey ? page.count : PAGE
+  const showMore = () => setPage({ key: pageKey, count: visible + PAGE })
+
+  // Load the next page as the list end scrolls into view.
+  const hasMore = shown.length > visible
+  useEffect(() => {
+    const el = sentinel.current
+    if (!el || !hasMore) return
+    const io = new IntersectionObserver((hits) => {
+      if (hits.some((h) => h.isIntersecting)) setPage((p) => ({ key: pageKey, count: (p.key === pageKey ? p.count : PAGE) + PAGE }))
+    }, { rootMargin: '240px' })
+    io.observe(el)
+    return () => io.disconnect()
+  }, [hasMore, visible, pageKey])
+
+  const groups = useMemo(() => groupByDay(shown.slice(0, visible)), [shown, visible])
+
+  function exportCsv() {
+    const blob = new Blob([toCsv(shown)], { type: 'text/csv;charset=utf-8' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `socialpay-activity-${new Date().toISOString().slice(0, 10)}.csv`
+    a.click()
+    URL.revokeObjectURL(url)
+  }
 
   if (!isConnected) {
     return (
@@ -104,79 +121,109 @@ export function ActivityView() {
     )
   }
 
+  const loadingFirst = shown.length === 0 && entries.length === 0 && (chain.scanning || chain.daysCovered === 0)
+  const hasTx = shown.some((e) => e.tx)
+
   return (
-    <div className="max-w-xl mx-auto pb-8">
-      <div className="px-4 pt-4 pb-3">
-        <h2 className="display font-bold text-lg mb-3" style={{ color: 'var(--ink)', letterSpacing: '-0.02em' }}>Activity</h2>
-        <div className="grid grid-cols-5 gap-1 p-1 rounded-xl" style={{ background: 'var(--surface-muted)' }}>
-          {(['all', 'payments', 'swaps', 'bridges', 'social'] as Filter[]).map((f) => (
-            <button key={f} onClick={() => setFilter(f)}
-              className="h-9 rounded-lg text-xs sm:text-sm font-semibold capitalize transition-all"
-              style={{
-                background: filter === f ? 'var(--surface-strong)' : 'transparent',
-                color: filter === f ? 'var(--ink)' : 'var(--muted)',
-                boxShadow: filter === f ? '0 1px 4px rgba(0,0,0,0.08)' : 'none',
-              }}>
-              {f}
-            </button>
-          ))}
+    <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.25 }}
+      className="max-w-2xl mx-auto px-4 pt-4 pb-10 flex flex-col gap-4">
+      <div className="flex items-end justify-between gap-3">
+        <div>
+          <h2 className="display font-bold text-2xl" style={{ color: 'var(--ink)', letterSpacing: '-0.03em' }}>Activity</h2>
+          <p className="text-xs mt-0.5 tabnum" style={{ color: 'var(--muted)' }}>
+            {counts.all.toLocaleString('en-US')} {counts.all === 1 ? 'entry' : 'entries'}
+          </p>
         </div>
+        <Button size="sm" variant="secondary" onClick={exportCsv} disabled={!hasTx} aria-label="Export transactions as CSV">
+          <Download size={14} /> Export CSV
+        </Button>
       </div>
 
-      <div className="px-4 pb-3 flex items-center justify-between gap-3 text-xs" style={{ color: 'var(--muted)' }}>
-        <span>
-          {chain.scanning
-            ? `Checking the chain for your payments and swaps... ${Math.round(chain.progress * 100)}%`
-            : chain.incomplete
-              ? 'Some of your history could not be loaded yet (the network limits how fast it can be read). Tap Load older to continue.'
-              : chain.daysCovered > 0
-                ? `Payments, swaps and bridges from the last ${chain.daysCovered} day${chain.daysCovered === 1 ? '' : 's'}, read from Arc.`
-                : 'Reading your history from Arc.'}
-        </span>
-        <Button size="sm" variant="secondary" onClick={chain.loadOlder} disabled={chain.scanning}>Load older</Button>
+      <div className="grid grid-cols-2 gap-3">
+        <StatCard icon={ArrowDownLeft} tone="green" label="Received" value={formatUsdcDisplay(totals.received)} unit="USDC" />
+        <StatCard icon={ArrowUpRight} tone="rose" label="Sent" value={formatUsdcDisplay(totals.sent)} unit="USDC" />
       </div>
 
-      {shown.length === 0 ? (
-        <EmptyState icon={<ActivityIcon size={24} />} title="Nothing here yet"
-          description="Your payments, posts, comments and reactions will show up here as one timeline." />
+      <SyncStatus />
+
+      <div className="relative">
+        <Search size={16} aria-hidden className="absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" style={{ color: 'var(--subtle)' }} />
+        <input
+          type="search"
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          placeholder="Search address, hash, memo or token"
+          aria-label="Search activity"
+          className="w-full h-11 pl-10 pr-10 rounded-xl text-sm outline-none transition-shadow focus:ring-2 focus:ring-[var(--focus)]"
+          style={{ background: 'var(--surface-strong)', border: '1px solid var(--border)', color: 'var(--ink)' }}
+        />
+        {query && (
+          <button onClick={() => setQuery('')} aria-label="Clear search"
+            className="absolute right-1 top-1/2 -translate-y-1/2 w-9 h-9 rounded-full flex items-center justify-center hover:bg-[var(--surface-muted)]"
+            style={{ color: 'var(--muted)' }}>
+            <X size={15} />
+          </button>
+        )}
+      </div>
+
+      <div className="flex gap-2 overflow-x-auto -mx-4 px-4 pb-1" role="tablist" aria-label="Activity type">
+        {FILTERS.map((f) => {
+          const active = filter === f.id
+          return (
+            <button key={f.id} role="tab" aria-selected={active} onClick={() => setFilter(f.id)}
+              className="h-10 px-3.5 rounded-full text-sm font-semibold whitespace-nowrap flex items-center gap-1.5 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus)]"
+              style={{
+                background: active ? 'var(--accent)' : 'var(--surface-strong)',
+                color: active ? '#fff' : 'var(--muted)',
+                border: '1px solid var(--border)',
+              }}>
+              {f.label}
+              <span className="tabnum text-xs opacity-70">{counts[f.id]}</span>
+            </button>
+          )
+        })}
+      </div>
+
+      {loadingFirst ? (
+        <RowsSkeleton />
+      ) : shown.length === 0 ? (
+        <div className="rounded-3xl" style={glassCard}>
+          <EmptyState
+            icon={<ActivityIcon size={24} />}
+            title={query || filter !== 'all' ? 'No matching activity' : 'Nothing here yet'}
+            description={
+              query || filter !== 'all'
+                ? 'Try a different search or filter.'
+                : chain.complete
+                  ? 'This wallet has no payments, swaps or bridges on Arc yet.'
+                  : 'Your payments, swaps, bridges and social activity will show up here as one timeline. Older history is still being read.'
+            }
+            action={(query || filter !== 'all') ? <Button size="sm" variant="secondary" onClick={() => { setQuery(''); setFilter('all') }}>Clear filters</Button> : undefined}
+          />
+        </div>
       ) : (
-        <div className="mx-4 rounded-2xl overflow-hidden divide-y" style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderColor: 'var(--border)' }}>
-          {shown.map((e) => {
-            const Icon = e.icon
-            return (
-              <div key={e.id} className="flex items-center gap-3 px-4 py-3">
-                <div className="w-9 h-9 rounded-full flex items-center justify-center flex-shrink-0"
-                  style={{ background: 'var(--surface-muted)', color: e.amount ? (e.amount.sign === '-' ? 'var(--danger)' : 'var(--success)') : 'var(--muted)' }}>
-                  <Icon size={18} />
-                </div>
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2">
-                    <span className="text-sm font-medium truncate" style={{ color: 'var(--ink)' }}>{e.title}</span>
-                    {e.status && <TxStatusBadge status={e.status} />}
-                  </div>
-                  <p className="text-xs truncate" style={{ color: 'var(--muted)' }}>
-                    {formatTimestamp(e.at)}{e.detail ? ` · ${e.detail}` : ''}
-                  </p>
-                </div>
-                {e.amount && (
-                  <span className="tabnum font-semibold text-sm" style={{ color: e.amount.sign === '-' ? 'var(--danger)' : 'var(--success)' }}>
-                    {e.amount.sign}{e.amount.text}
-                  </span>
-                )}
-                {e.txHash && (
-                  <a href={e.url ?? ''} target="_blank" rel="noopener noreferrer"
-                    aria-label="View on Arc Explorer" className="p-1.5 rounded" style={{ color: 'var(--muted)' }}>
-                    <ExternalLink size={14} />
-                  </a>
-                )}
+        <div className="flex flex-col gap-4">
+          {groups.map((g) => (
+            <section key={g.label} aria-label={g.label}>
+              <h3 className="px-1 mb-1.5 text-[11px] font-semibold uppercase tracking-wider" style={{ color: 'var(--subtle)' }}>{g.label}</h3>
+              <div className="rounded-3xl p-1.5 flex flex-col" style={glassCard}>
+                {g.entries.map((e) => <ActivityRow key={e.id} entry={e} />)}
               </div>
-            )
-          })}
+            </section>
+          ))}
+          {hasMore && (
+            <div ref={sentinel} className="flex justify-center">
+              <Button variant="secondary" size="sm" onClick={showMore}>
+                Show more ({(shown.length - visible).toLocaleString('en-US')} left)
+              </Button>
+            </div>
+          )}
         </div>
       )}
-      <p className="text-xs px-4 mt-3" style={{ color: 'var(--subtle)' }}>
-        Payments are confirmed against the Arc network by transaction hash. Posts, comments and reactions are app data stored off-chain.
+
+      <p className="text-xs px-1 text-pretty" style={{ color: 'var(--subtle)' }}>
+        Payments, swaps and bridges are read from the Arc network and confirmed by transaction hash. Posts, comments and reactions are app data stored off-chain.
       </p>
-    </div>
+    </motion.div>
   )
 }

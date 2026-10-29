@@ -42,3 +42,16 @@ Social messaging with native USDC payments on Arc Mainnet: chat + in-chat pay, s
 npm install
 npm run dev
 ```
+
+---
+
+## Preview server (sandbox)
+
+The sandbox preview runs the optimized build (`bunx next start -H 0.0.0.0 -p 5173`), not `next dev`: the dev server's bundle is ~17 MB and it ran the sandbox out of memory. After any code change, run `bunx next build` (about a minute) and restart the preview server so the change shows up. Stop the preview server before building.
+
+## Recent changes
+
+- Activity tab: reads the wallet's full history from Arc in the background (paused/resumed from the Activity screen), caches it per wallet in the browser (`src/lib/activityCache.ts`), search/filters/day groups/CSV export. Arc's public RPC allows a burst of ~60 requests, then about one every two seconds, so far-back history is slow by design.
+- Pay > Batch: two-step flow (add recipients, then review and confirm). Components: `src/components/pay/BatchForm.tsx`, `BatchRowItem.tsx`, `BatchReview.tsx`.
+- Social sync (`src/hooks/usePersistentSocial.ts`, `src/utils/socialSync.ts`): a post counts as saved only after the server confirms it; fixes fresh posts being dropped by a poll that started before the save.
+- Known issue: `bun run hardhat:test` fails because Hardhat tries to compile `contracts/test/*.t.sol` (needs forge-std). Foundry tests (`forge test`) are the working suite.

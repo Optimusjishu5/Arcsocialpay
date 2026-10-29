@@ -1,0 +1,177 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ── Arc Design Tokens ──────────────────────────────────── */
+:root {
+  --bg: #f9f9fc;
+  --bg-gradient: linear-gradient(180deg, #f9f9fc 0%, #fffcf7 52%, #fbf7f2 100%);
+  --surface: rgba(255, 255, 255, 0.80);
+  --surface-strong: rgba(255, 255, 255, 0.96);
+  --surface-muted: #f2f3f7;
+  --ink: #122d45;
+  --ink-2: #334155;
+  --muted: #6b6580;
+  --subtle: #8a849c;
+  --border: rgba(18, 45, 69, 0.10);
+  --border-strong: rgba(25, 53, 77, 0.30);
+  --accent: #122d45;
+  --accent-hover: #1061a6;
+  --focus: #85b1ed;
+  --success: #1a8047;
+  --danger: #ba2b4c;
+  --success-bg: #f0faf4;
+  --danger-bg: #fff0f3;
+  --nav-h: 60px;
+  --sidebar-w: 240px;
+}
+
+.dark {
+  --bg: #0d1b2f;
+  --bg-gradient: linear-gradient(180deg, #0d1b2f 0%, #0d1b2f 58%, #122d45 100%);
+  --surface: rgba(255, 255, 255, 0.07);
+  --surface-strong: rgba(255, 255, 255, 0.12);
+  --surface-muted: #1a2b3f;
+  --ink: #f9faf3;
+  --ink-2: #e3ecf9;
+  --muted: #cbd5e1;
+  --subtle: #94a3b8;
+  --border: rgba(255, 255, 255, 0.10);
+  --border-strong: rgba(203, 219, 242, 0.45);
+  --accent: #acc6e9;
+  --accent-hover: #cbdbf2;
+  --success: #8dd89f;
+  --danger: #e86d7a;
+  --success-bg: rgba(141, 216, 159, 0.12);
+  --danger-bg: rgba(232, 109, 122, 0.12);
+}
+
+* { box-sizing: border-box; }
+
+html { scroll-behavior: smooth; }
+
+body {
+  margin: 0;
+  font-family: 'DM Sans', sans-serif;
+  min-height: 100dvh;
+  background: var(--bg);
+  color: var(--ink);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+.display { font-family: 'Space Grotesk', sans-serif; letter-spacing: -0.03em; }
+.mono { font-family: 'JetBrains Mono', Menlo, monospace; }
+
+/* Scrollbar */
+::-webkit-scrollbar { width: 4px; height: 4px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--border-strong); border-radius: 2px; }
+
+/* Sonner overrides */
+[data-sonner-toast] { font-family: 'DM Sans', sans-serif !important; }
+
+/* ConnectKit overrides */
+.ck-button { font-family: 'DM Sans', sans-serif !important; }
+
+/* Chat bubble tail */
+.bubble-sent::after {
+  content: '';
+  position: absolute;
+  right: -6px;
+  bottom: 6px;
+  width: 0;
+  height: 0;
+  border-style: solid;
+  border-width: 6px 0 0 8px;
+  border-color: transparent transparent transparent var(--tone-to, var(--accent));
+}
+.bubble-recv::after {
+  content: '';
+  position: absolute;
+  left: -6px;
+  bottom: 6px;
+  width: 0;
+  height: 0;
+  border-style: solid;
+  border-width: 6px 8px 0 0;
+  border-color: transparent var(--surface-strong) transparent transparent;
+}
+
+/* Tabular numbers for balances */
+.tabnum { font-variant-numeric: tabular-nums; }
+
+/* Safe area insets for mobile */
+.safe-bottom { padding-bottom: env(safe-area-inset-bottom, 16px); }
+
+/* ── Colorful pages (Messages, Pay, Swap, Bridge) ─────────────────────────
+   A page opts in with className="tone-scope" and --tone-from / --tone-to. */
+:root {
+  --tone-from: #5fbeff;
+  --tone-to: #2563eb;
+  --tone-glow: rgba(37, 99, 235, 0.45);
+}
+.tone-scope { --tone-text: var(--tone-to); }
+.dark .tone-scope { --tone-text: var(--tone-from); }
+
+/* Cards: glass with a colored top edge and a soft colored glow */
+.tone-scope [data-tc] {
+  position: relative;
+  overflow: hidden;
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--tone-from) 10%, transparent) 0%, transparent 38%),
+    var(--surface);
+  border: 1px solid color-mix(in srgb, var(--tone-to) 22%, var(--border));
+  backdrop-filter: blur(18px) saturate(160%);
+  -webkit-backdrop-filter: blur(18px) saturate(160%);
+  box-shadow: 0 16px 36px -22px var(--tone-glow), inset 0 1px 0 rgba(255, 255, 255, 0.06);
+}
+.tone-scope [data-tc]::before {
+  content: '';
+  position: absolute;
+  inset: 0 0 auto 0;
+  height: 3px;
+  background: linear-gradient(90deg, var(--tone-from), var(--tone-to));
+  pointer-events: none;
+}
+
+/* Inner panels and fields */
+.tone-scope [data-tp] {
+  background: color-mix(in srgb, var(--tone-from) 8%, var(--surface-muted));
+  border: 1px solid color-mix(in srgb, var(--tone-to) 18%, var(--border));
+}
+.tone-scope [data-ti] {
+  background: color-mix(in srgb, var(--tone-from) 9%, var(--surface-muted));
+  border: 1px solid color-mix(in srgb, var(--tone-to) 30%, var(--border));
+  color: var(--ink);
+  transition: box-shadow 0.15s ease, border-color 0.15s ease;
+}
+.tone-scope [data-ti]:focus {
+  outline: none;
+  border-color: var(--tone-to);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--tone-from) 35%, transparent);
+}
+.tone-scope [data-chip] {
+  background: color-mix(in srgb, var(--tone-from) 14%, var(--surface-muted));
+  border: 1px solid color-mix(in srgb, var(--tone-to) 28%, var(--border));
+  color: var(--tone-text);
+  font-weight: 600;
+  transition: transform 0.12s ease, background 0.12s ease;
+}
+.tone-scope [data-chip]:hover { background: color-mix(in srgb, var(--tone-from) 26%, var(--surface-muted)); transform: translateY(-1px); }
+.tone-scope [data-chip]:active { transform: scale(0.96); }
+
+/* Field labels pick up the page color */
+.tone-scope label { color: var(--tone-text) !important; }
+
+/* Primary buttons: gradient with a colored glow */
+.tone-scope [data-variant='primary']:not(:disabled) {
+  background: linear-gradient(135deg, var(--tone-from) 0%, var(--tone-to) 100%);
+  color: #fff;
+  box-shadow: 0 14px 26px -12px var(--tone-glow), inset 0 1px 0 rgba(255, 255, 255, 0.35);
+}
+.tone-scope [data-variant='primary']:not(:disabled):hover { filter: brightness(1.06) saturate(1.1); transform: translateY(-1px); }
+.tone-scope [data-variant='secondary'] {
+  border-color: color-mix(in srgb, var(--tone-to) 40%, var(--border-strong));
+  color: var(--tone-text);
+}
