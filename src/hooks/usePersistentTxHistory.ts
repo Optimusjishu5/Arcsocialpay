@@ -17,6 +17,9 @@ async function safeJson(res: Response): Promise<Record<string, unknown>> {
   }
 }
 
+/** A string field from untrusted JSON, or empty when it is not a string. */
+const str = (v: unknown): string => (typeof v === 'string' ? v : '')
+
 function toRecord(raw: unknown): TxRecord | null {
   if (!raw || typeof raw !== 'object') return null
   const r = raw as Record<string, unknown>
@@ -26,9 +29,9 @@ function toRecord(raw: unknown): TxRecord | null {
     txHash: r.txHash,
     chainId: typeof r.chainId === 'number' ? r.chainId : 5042,
     direction: r.direction === 'received' ? 'received' : 'sent',
-    amount: String(r.amount ?? ''),
-    fromAddress: String(r.fromAddress ?? ''),
-    toAddress: String(r.toAddress ?? ''),
+    amount: str(r.amount),
+    fromAddress: str(r.fromAddress),
+    toAddress: str(r.toAddress),
     status: (r.status as TxRecord['status']) ?? 'pending',
     timestamp: typeof r.timestamp === 'number' ? r.timestamp : Date.now(),
     note: typeof r.note === 'string' ? r.note : undefined,
@@ -43,11 +46,12 @@ export function usePersistentTxHistory(address: string | undefined) {
   const hydratedFor = useRef<string | null>(null)
   // Records mutate (pending → confirmed), so track last-sent snapshots.
   const sent = useRef<Map<string, string>>(new Map())
+  const off = useRef(false)
 
   const pull = async (): Promise<boolean> => {
     if (!address) return false
     try {
-      const res = await fetch(`/api/tx-history?address=${encodeURIComponent(address)}&limit=200`)
+      const res = await fetch(`/api/tx-history?address=${encodeURIComponent(address)}&limit=1000`)
       if (!res.ok) return false
       const json = await safeJson(res)
       if (json.configured === false) return false
@@ -82,21 +86,23 @@ export function usePersistentTxHistory(address: string | undefined) {
   useEffect(() => {
     if (!address) return
     const sync = () => {
+      if (off.current) return
       void (async () => {
         try {
           const { txHistory } = appStore.getState()
-          for (const record of txHistory.slice(0, 200)) {
+          for (const record of txHistory.slice(0, 1000)) {
             const key = record.txHash.toLowerCase()
             const snap = JSON.stringify(record)
             if (sent.current.get(key) === snap) continue
             sent.current.set(key, snap)
-            await fetch('/api/tx-history', {
+            const res = await fetch('/api/tx-history', {
               method: 'POST',
               headers: { 'content-type': 'application/json' },
               body: JSON.stringify(record),
-            }).catch(() => {
-              sent.current.delete(key)
-            })
+            }).catch(() => null)
+            if (!res || !res.ok) sent.current.delete(key)
+            // 503 means no database is set up: stop instead of repeating every record.
+            if (res?.status === 503) { off.current = true; break }
           }
         } catch {
           // best-effort only
@@ -118,12 +124,14 @@ export function usePersistentTxHistory(address: string | undefined) {
       void (async () => {
         try {
           const res = await fetch(
-            `/api/tx-history?address=${encodeURIComponent(address)}&limit=200`,
+            `/api/tx-history?address=${encodeURIComponent(address)}&limit=1000`,
           )
+          if (res.status === 404) { disabled = true; off.current = true; return } // static host: no server routes
           if (!res.ok) return
           const json = await safeJson(res)
           if (json.configured === false) {
             disabled = true
+            off.current = true
             return
           }
           const records = Array.isArray(json.records)

@@ -28,3 +28,6 @@ cache/
 # Compass fork-verify receipts
 .compass-verify/
 contracts/.compass-verify/
+
+# Temporary staging folder for Vercel uploads
+.vercel-src/

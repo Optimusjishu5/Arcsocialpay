@@ -20,7 +20,7 @@ export async function GET(req: Request) {
     if (!address) {
       return NextResponse.json({ error: 'address query param required' }, { status: 400 })
     }
-    const limit = Math.min(Math.max(Number(url.searchParams.get('limit')) || 200, 1), 500)
+    const limit = Math.min(Math.max(Number(url.searchParams.get('limit')) || 200, 1), 2000)
     const records = await listTxRecords(address, limit)
     return NextResponse.json({ configured: true, records })
   } catch (e) {

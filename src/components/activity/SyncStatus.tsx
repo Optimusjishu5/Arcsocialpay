@@ -58,6 +58,11 @@ export function SyncStatus() {
             style={{ color: 'var(--ink)' }}><RefreshCw size={16} /></button>
         </div>
       </div>
+      {!s.saved && (
+        <p className="mt-2.5 text-[11px] text-pretty" style={{ color: '#a16207' }}>
+          This browser window cannot keep saved history (private mode?). History is read again each visit.
+        </p>
+      )}
       {!s.complete && s.coverage < 0.5 && !s.paused && (
         <p className="mt-2.5 text-[11px] text-pretty" style={{ color: 'var(--subtle)' }}>
           Arc limits how fast history can be read, so going far back can take a while. It keeps going in the background and your newest transactions are already shown.

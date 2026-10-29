@@ -8,6 +8,7 @@ import { useArcAccount } from '../hooks/useArcWallet'
 import { useAppStore } from '../store/appStore'
 import { useSettings } from '../hooks/useSettings'
 import { useOnchainStatus } from '../hooks/useOnchainActivity'
+import { useCachedRecords } from '../lib/activityCache'
 import { EmptyState } from './ui/EmptyState'
 import { Button } from './ui/Button'
 import { StatCard, glassCard } from './dashboard/ui'
@@ -46,9 +47,17 @@ export function ActivityView() {
   const [page, setPage] = useState({ key: '', count: PAGE })
   const sentinel = useRef<HTMLDivElement>(null)
 
+  // Everything read from the chain lives in the permanent store below; the app's own list
+  // (pending sends, recent items) goes first so a live status wins over a saved copy.
+  const saved = useCachedRecords(address)
+  const allTx = useMemo(
+    () => [...txHistory, ...saved.map((r) => ({ ...r, id: `chain-${r.txHash}` }))],
+    [txHistory, saved],
+  )
+
   const entries = useMemo(
-    () => (address ? buildEntries({ address, txHistory, posts, comments, notifications: filterNotifications(notifications) }) : []),
-    [address, txHistory, posts, comments, notifications, filterNotifications],
+    () => (address ? buildEntries({ address, txHistory: allTx, posts, comments, notifications: filterNotifications(notifications) }) : []),
+    [address, allTx, posts, comments, notifications, filterNotifications],
   )
 
   const counts = useMemo(() => {
@@ -121,7 +130,9 @@ export function ActivityView() {
     )
   }
 
-  const loadingFirst = shown.length === 0 && entries.length === 0 && (chain.scanning || chain.daysCovered === 0)
+  // The skeleton only shows while the first look at the chain is genuinely in progress.
+  const loadingFirst = entries.length === 0 && (!chain.ready || (chain.scanning && chain.daysCovered === 0))
+  const unreachable = entries.length === 0 && chain.ready && !chain.scanning && chain.incomplete
   const hasTx = shown.some((e) => e.tx)
 
   return (
@@ -190,15 +201,19 @@ export function ActivityView() {
         <div className="rounded-3xl" style={glassCard}>
           <EmptyState
             icon={<ActivityIcon size={24} />}
-            title={query || filter !== 'all' ? 'No matching activity' : 'Nothing here yet'}
+            title={query || filter !== 'all' ? 'No matching activity' : unreachable ? 'Could not reach Arc' : 'Nothing here yet'}
             description={
               query || filter !== 'all'
                 ? 'Try a different search or filter.'
+                : unreachable
+                  ? 'Your history could not be loaded just now. It retries by itself, or you can try again.'
                 : chain.complete
                   ? 'This wallet has no payments, swaps or bridges on Arc yet.'
                   : 'Your payments, swaps, bridges and social activity will show up here as one timeline. Older history is still being read.'
             }
-            action={(query || filter !== 'all') ? <Button size="sm" variant="secondary" onClick={() => { setQuery(''); setFilter('all') }}>Clear filters</Button> : undefined}
+            action={(query || filter !== 'all')
+              ? <Button size="sm" variant="secondary" onClick={() => { setQuery(''); setFilter('all') }}>Clear filters</Button>
+              : unreachable ? <Button size="sm" variant="secondary" onClick={chain.rescan}>Try again</Button> : undefined}
           />
         </div>
       ) : (

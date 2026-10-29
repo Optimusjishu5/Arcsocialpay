@@ -63,3 +63,57 @@ describe('classifyActivity', () => {
     expect(out[0].amount).toBe('0.0015')
   })
 })
+
+import { FAST_WINDOW, SCAN_WINDOW, SYSTEM_EMITTER, logSources, planWindows, toTransferLog } from '../../src/lib/onchainActivity'
+
+const topic = (a: string) => `0x${a.slice(2).toLowerCase().padStart(64, '0')}`
+const TRANSFER = '0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef'
+
+describe('native USDC (system emitter) logs', () => {
+  test('a plain native send becomes a 6-decimal USDC payment', () => {
+    // 2.5 USDC in the 18-decimal native unit
+    const log = toTransferLog({
+      address: SYSTEM_EMITTER, topics: [TRANSFER, topic(ME), topic(OTHER)],
+      data: `0x${(2_500_000_000_000_000_000n).toString(16)}`, blockNumber: '0x64', transactionHash: '0xnative',
+    })!
+    expect(log.token.toLowerCase()).toBe(USDC)
+    expect(log.value).toBe(2_500_000n)
+    const out = classifyActivity(ME, [log], [], UNI_TOKENS, 5042)
+    expect(out).toHaveLength(1)
+    expect(out[0].amount).toBe('2.5')
+    expect(out[0].direction).toBe('sent')
+  })
+
+  test('dust below one millionth and empty logs are dropped', () => {
+    expect(toTransferLog({ address: SYSTEM_EMITTER, topics: [TRANSFER, topic(ME), topic(OTHER)], data: '0x1', blockNumber: '0x1', transactionHash: '0xa' })).toBeNull()
+    expect(toTransferLog({ address: SYSTEM_EMITTER, topics: [TRANSFER], data: '0x1', blockNumber: '0x1', transactionHash: '0xa' })).toBeNull()
+  })
+
+  test('other tokens are read from their own contract; USDC only from the system emitter', () => {
+    const sources = logSources(UNI_TOKENS).map((a) => a.toLowerCase())
+    expect(sources).toContain(SYSTEM_EMITTER.toLowerCase())
+    expect(sources).not.toContain(USDC) // its ERC-20 log duplicates the system log
+    expect(sources).toContain(EURC)
+  })
+})
+
+describe('planWindows', () => {
+  test('covers the range exactly once, newest first, with no gaps or overlaps', () => {
+    const w = planWindows(1_000n, 1_000_000n, 600_000n)
+    expect(w[0].hi).toBe(1_000_000n)
+    expect(w[w.length - 1].lo).toBe(1_000n)
+    for (let i = 1; i < w.length; i++) expect(w[i].hi).toBe(w[i - 1].lo - 1n)
+    expect(w.filter((x) => x.fast).every((x) => x.lo >= 600_000n && x.hi - x.lo + 1n <= BigInt(FAST_WINDOW))).toBe(true)
+    expect(w.filter((x) => !x.fast).every((x) => x.hi < 600_000n && x.hi - x.lo + 1n <= BigInt(SCAN_WINDOW))).toBe(true)
+  })
+
+  test('without a fast RPC every window is small', () => {
+    const w = planWindows(0n, 50_000n, null)
+    expect(w.every((x) => !x.fast && x.hi - x.lo + 1n <= BigInt(SCAN_WINDOW))).toBe(true)
+    expect(w[w.length - 1].lo).toBe(0n)
+  })
+
+  test('a single block works', () => {
+    expect(planWindows(5n, 5n, null)).toEqual([{ lo: 5n, hi: 5n, fast: false }])
+  })
+})

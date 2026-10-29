@@ -127,50 +127,103 @@ export function classifyActivity(
 
 // ── Fetching ────────────────────────────────────────────────────────────────
 
-/** The Arc RPC rejects wide log queries (8,000 blocks worked, 10,000 failed when measured), so scan in small windows. */
+/** The primary RPC rejects wide log queries (8,000 blocks is safe; 50,000 is refused). */
 export const SCAN_WINDOW = 8_000
+/** A second public RPC accepts up to 100,000 blocks per query, but only keeps about 2.5 days of history. */
+export const FAST_WINDOW = 90_000
+export const FAST_RPC_URL = 'https://rpc.blockdaemon.mainnet.arc.io'
+/** Stay well inside the fast RPC's retained history, which slides forward as the chain grows. */
+export const FAST_REACH_BLOCKS = 380_000
 /** About 24 hours of Arc blocks (about half a second each). */
 export const BLOCKS_PER_DAY = 172_800
 
+/**
+ * Arc logs every USDC movement (native sends, ERC-20 transfers, mints, burns) from this system
+ * address in 18 decimals. An ERC-20 transfer ALSO logs from the USDC contract in 6 decimals, but a
+ * plain native send logs only from here, so this is the one source that sees all USDC movement.
+ */
+export const SYSTEM_EMITTER = '0xffffFFFfFFffffffffffffffFfFFFfffFFFfFFfE'
+const USDC_ERC20 = '0x3600000000000000000000000000000000000000'
+const NATIVE_PER_ERC20_UNIT = 10n ** 12n
+
 const TRANSFER_TOPIC = '0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef'
 
-interface RpcLog { address: string; topics: string[]; data: string; blockNumber: string; transactionHash: string }
+export interface RpcLog { address: string; topics: string[]; data: string; blockNumber: string; transactionHash: string }
 
-/** The RPC also refuses answers with more than 2,000 logs, which a very active wallet can hit. */
-export const isTooBig = (e: unknown) => /max results|range too large|exceeds max/i.test(errText(e))
+const topicAddr = (t: string) => getAddress(`0x${t.slice(-40)}`)
+const hex = (n: bigint) => `0x${n.toString(16)}`
+
+/**
+ * Turns a raw log into a transfer. System-emitter logs (18 decimals) become 6-decimal USDC
+ * transfers, so the rest of the app sees one consistent USDC. Returns null for logs to ignore.
+ */
+export function toTransferLog(l: RpcLog): TransferLog | null {
+  if (l.topics.length < 3) return null
+  let token = l.address
+  let value = BigInt(l.data)
+  if (same(l.address, SYSTEM_EMITTER)) {
+    token = USDC_ERC20
+    value /= NATIVE_PER_ERC20_UNIT // dust below one millionth of a dollar is dropped
+  }
+  if (value === 0n) return null
+  return {
+    txHash: l.transactionHash, blockNumber: BigInt(l.blockNumber), token,
+    from: topicAddr(l.topics[1]), to: topicAddr(l.topics[2]), value,
+  }
+}
+
+/** The addresses to read logs from: the system emitter for USDC (not the duplicate ERC-20 log), plus every other token. */
+export function logSources(tokens: ScanToken[]): string[] {
+  return [SYSTEM_EMITTER, ...tokens.filter((t) => !same(t.address, USDC_ERC20)).map((t) => t.address)]
+}
+
+/** The RPCs refuse answers with too many results or too wide a range; the caller splits the window. */
+export const isTooBig = (e: unknown) => /max results|range too large|exceeds max|query exceeds|more than \d+ results|too many results/i.test(errText(e))
 const isRateLimited = (e: unknown) => /rate limit|too many requests|429/i.test(errText(e))
 function errText(e: unknown): string {
   return String((e as Error)?.message ?? e) + String((e as { details?: string })?.details ?? '')
 }
 
-// Measured on Arc's public RPC: a burst of roughly 60 requests is accepted, then about one
-// request every two seconds (the limit refills slowly). Requests start one at a time and the
-// gap below widens whenever the RPC says "rate limit", so a long scan settles at the real pace.
-const MIN_GAP_MS = 340
-const MAX_GAP_MS = 2_000
-// The gap adapts: every "rate limit" answer widens it, every success narrows it again,
-// so a long scan settles at the pace the RPC really allows instead of failing midway.
-let gapMs = MIN_GAP_MS
-let nextStart = 0
-async function withSlot<T>(fn: () => Promise<T>): Promise<T> {
-  const now = Date.now()
-  const startAt = Math.max(now, nextStart)
-  nextStart = startAt + gapMs
-  if (startAt > now) await new Promise((r) => setTimeout(r, startAt - now))
-  return fn()
+// Each RPC has its own pace. Measured: the primary RPC accepts a burst of roughly 60 requests and
+// then about one every two seconds. The gap below widens on every "rate limit" answer and narrows
+// again on success, so a long scan settles at the pace each RPC really allows.
+class Pace {
+  gap: number
+  private next = 0
+  constructor(private readonly min: number, private readonly max: number) { this.gap = min }
+  async slot(): Promise<void> {
+    const now = Date.now()
+    const startAt = Math.max(now, this.next)
+    this.next = startAt + this.gap
+    if (startAt > now) await new Promise((r) => setTimeout(r, startAt - now))
+  }
+  ok() { this.gap = Math.max(this.min, this.gap * 0.97) }
+  limited() { this.gap = Math.min(this.max, this.gap * 1.6) }
+}
+const paces = new WeakMap<object, Pace>()
+function paceOf(client: PublicClient): Pace {
+  let p = paces.get(client)
+  if (!p) { p = new Pace(340, 2_000); paces.set(client, p) }
+  return p
+}
+/** Marks a client as the fast one (shorter minimum gap). */
+export function markFastClient(client: PublicClient): void {
+  paces.set(client, new Pace(120, 2_000))
 }
 
-async function rpc<T>(fn: () => Promise<T>): Promise<T> {
+async function rpc<T>(client: PublicClient, fn: () => Promise<T>): Promise<T> {
+  const pace = paceOf(client)
   let lastError: unknown
   for (let attempt = 0; attempt < 8; attempt++) {
     try {
-      const result = await withSlot(fn)
-      gapMs = Math.max(MIN_GAP_MS, gapMs * 0.97)
+      await pace.slot()
+      const result = await fn()
+      pace.ok()
       return result
     } catch (e) {
       lastError = e
       if (isTooBig(e)) throw e // the caller splits the window instead of retrying the same one
-      if (isRateLimited(e)) gapMs = Math.min(MAX_GAP_MS, gapMs * 1.6)
+      if (isRateLimited(e)) pace.limited()
       // A rate limit refills slowly, so wait for it instead of burning attempts.
       await new Promise((r) => setTimeout(r, isRateLimited(e) ? 2_000 * (attempt + 1) : 300 * 2 ** attempt))
     }
@@ -180,64 +233,51 @@ async function rpc<T>(fn: () => Promise<T>): Promise<T> {
 
 async function rawLogs(client: PublicClient, params: Record<string, unknown>): Promise<RpcLog[]> {
   const request = client.request as unknown as (a: { method: string; params: unknown[] }) => Promise<RpcLog[]>
-  return rpc(() => request({ method: 'eth_getLogs', params: [params] }))
+  return rpc(client, () => request({ method: 'eth_getLogs', params: [params] }))
 }
-
-const topicAddr = (t: string) => getAddress(`0x${t.slice(-40)}`)
-const hex = (n: bigint) => `0x${n.toString(16)}`
 
 /** Fetches logs for one window of blocks. Throws if any query fails, so the caller never records a gap as scanned. */
 async function fetchWindowOnce(
   client: PublicClient,
   me: string,
   tokens: ScanToken[],
-  socialPay: string | null,
   from: bigint,
   to: bigint,
-): Promise<{ transfers: TransferLog[]; pays: PayLog[] }> {
+): Promise<TransferLog[]> {
   const range = { fromBlock: hex(from), toBlock: hex(to) }
   const meTopic = pad(me as `0x${string}`).toLowerCase()
-  const tokenAddrs = tokens.map((t) => t.address)
-
-  const queries: Promise<RpcLog[]>[] = [
-    rawLogs(client, { ...range, address: tokenAddrs, topics: [TRANSFER_TOPIC, meTopic] }),
-    rawLogs(client, { ...range, address: tokenAddrs, topics: [TRANSFER_TOPIC, null, meTopic] }),
-  ]
-  // Payments through the SocialPay contract move USDC like any transfer, so the two transfer
-  // queries already find them. Skipping the contract's own events halves the number of RPC calls.
-  void socialPay
-  const results = await Promise.all(queries)
-
+  const address = logSources(tokens)
+  // Payments through the SocialPay contract move USDC like any transfer, so these two queries
+  // already find them. Memos and tips are added afterwards from the receipts of those payments.
+  const results = await Promise.all([
+    rawLogs(client, { ...range, address, topics: [TRANSFER_TOPIC, meTopic] }),
+    rawLogs(client, { ...range, address, topics: [TRANSFER_TOPIC, null, meTopic] }),
+  ])
   const transfers: TransferLog[] = []
   for (const l of [...results[0], ...results[1]]) {
-    if (l.topics.length < 3) continue
-    transfers.push({
-      txHash: l.transactionHash, blockNumber: BigInt(l.blockNumber), token: l.address,
-      from: topicAddr(l.topics[1]), to: topicAddr(l.topics[2]), value: BigInt(l.data),
-    })
+    const t = toTransferLog(l)
+    if (t) transfers.push(t)
   }
-  // Memos and tips are added afterwards from the receipts of the payments that were found.
-  return { transfers: dedupe(transfers), pays: [] as PayLog[] }
+  return dedupe(transfers)
 }
 
 export async function fetchWindow(
   client: PublicClient,
   me: string,
   tokens: ScanToken[],
-  socialPay: string | null,
   from: bigint,
   to: bigint,
-): Promise<{ transfers: TransferLog[]; pays: PayLog[] }> {
+): Promise<TransferLog[]> {
   try {
-    return await fetchWindowOnce(client, me, tokens, socialPay, from, to)
+    return await fetchWindowOnce(client, me, tokens, from, to)
   } catch (e) {
     if (!isTooBig(e) || from >= to) throw e
     const mid = from + (to - from) / 2n
     const [a, b] = await Promise.all([
-      fetchWindow(client, me, tokens, socialPay, from, mid),
-      fetchWindow(client, me, tokens, socialPay, mid + 1n, to),
+      fetchWindow(client, me, tokens, from, mid),
+      fetchWindow(client, me, tokens, mid + 1n, to),
     ])
-    return { transfers: [...a.transfers, ...b.transfers], pays: [...a.pays, ...b.pays] }
+    return [...a, ...b]
   }
 }
 
@@ -250,10 +290,32 @@ function dedupe(list: TransferLog[]): TransferLog[] {
     return true
   })
 }
+
+export interface ScanWindow { lo: bigint; hi: bigint; fast: boolean }
+
 /**
- * Scans [from, to] newest first in small windows and returns history entries with
- * timestamps. If a window keeps failing the scan stops there and `scannedLow` says
- * how far down it really got, so the gap is retried next time instead of being skipped.
+ * Splits [from, to] into windows, newest first. Blocks at or above `fastFloor` use the large
+ * windows of the fast RPC; older blocks use small windows on the primary RPC.
+ */
+export function planWindows(from: bigint, to: bigint, fastFloor: bigint | null): ScanWindow[] {
+  const out: ScanWindow[] = []
+  let hi = to
+  while (hi >= from) {
+    const fast = fastFloor !== null && hi >= fastFloor
+    const size = BigInt(fast ? FAST_WINDOW : SCAN_WINDOW)
+    let lo = hi - size + 1n
+    if (fast && fastFloor !== null && lo < fastFloor) lo = fastFloor
+    if (lo < from) lo = from
+    out.push({ lo, hi, fast })
+    hi = lo - 1n
+  }
+  return out
+}
+
+/**
+ * Scans [from, to] newest first and returns history entries with timestamps. If a window keeps
+ * failing the scan stops there and `scannedLow` says how far down it really got, so the gap is
+ * retried next time instead of being skipped. An entry is never saved without its real time.
  */
 export async function scanRange(
   client: PublicClient,
@@ -266,38 +328,64 @@ export async function scanRange(
   onProgress?: (doneBlocks: bigint, totalBlocks: bigint) => void,
   /** Called with each batch of finished entries so they show up while the scan is still running. */
   onRecords?: (records: Omit<TxRecord, 'id'>[]) => void,
+  /** Optional second RPC with wide windows for the most recent days. */
+  fastClient?: PublicClient,
+  /** Newest block the head was at when the scan started (used to decide what the fast RPC still holds). */
+  head?: bigint,
 ): Promise<{ records: Omit<TxRecord, 'id'>[]; scannedLow: bigint }> {
-  const windows: [bigint, bigint][] = []
-  for (let hi = to; hi >= from; hi -= BigInt(SCAN_WINDOW)) {
-    const lo = hi - BigInt(SCAN_WINDOW) + 1n > from ? hi - BigInt(SCAN_WINDOW) + 1n : from
-    windows.push([lo, hi])
-    if (lo === from) break
-  }
+  const fastFloor = fastClient && head !== undefined ? (head > BigInt(FAST_REACH_BLOCKS) ? head - BigInt(FAST_REACH_BLOCKS) : 0n) : null
+  const windows = planWindows(from, to, fastFloor)
   const all: Omit<TxRecord, 'id'>[] = []
   let scannedLow = to + 1n
   const total = to - from + 1n
   const CONCURRENCY = 2
+
+  /** One window; the fast RPC falls back to the primary one if it fails. */
+  async function load(w: ScanWindow): Promise<TransferLog[]> {
+    if (w.fast && fastClient) {
+      try {
+        return await fetchWindow(fastClient, me, tokens, w.lo, w.hi)
+      } catch {
+        // fall through to the primary RPC in small windows
+      }
+    }
+    const out: TransferLog[] = []
+    for (let hi = w.hi; hi >= w.lo; hi -= BigInt(SCAN_WINDOW)) {
+      const lo = hi - BigInt(SCAN_WINDOW) + 1n > w.lo ? hi - BigInt(SCAN_WINDOW) + 1n : w.lo
+      out.push(...(await fetchWindow(client, me, tokens, lo, hi)))
+      if (lo === w.lo) break
+    }
+    return out
+  }
+
+  async function blockTime(n: number): Promise<number> {
+    const big = BigInt(n)
+    if (fastClient && fastFloor !== null && big >= fastFloor) {
+      try {
+        const blk = await rpc(fastClient, () => fastClient.getBlock({ blockNumber: big }))
+        return Number(blk.timestamp) * 1000
+      } catch { /* try the primary RPC */ }
+    }
+    const blk = await rpc(client, () => client.getBlock({ blockNumber: big }))
+    return Number(blk.timestamp) * 1000
+  }
+
   for (let i = 0; i < windows.length; i += CONCURRENCY) {
     const group = windows.slice(i, i + CONCURRENCY)
     try {
-      const parts = await Promise.all(group.map(([lo, hi]) => fetchWindow(client, me, tokens, socialPay, lo, hi)))
+      const parts = await Promise.all(group.map(load))
       // A transaction's logs all sit in one block, so a window never splits a transaction.
-      const classified = classifyActivity(me, parts.flatMap((p) => p.transfers), parts.flatMap((p) => p.pays), tokens, chainId)
+      const classified = classifyActivity(me, parts.flat(), [], tokens, chainId)
       const times = new Map<number, number>()
       const blocks = [...new Set(classified.map((r) => r.blockNumber))]
       for (let b = 0; b < blocks.length; b += 6) {
-        await Promise.all(blocks.slice(b, b + 6).map(async (n) => {
-          try {
-            const blk = await rpc(() => client.getBlock({ blockNumber: BigInt(n) }))
-            times.set(n, Number(blk.timestamp) * 1000)
-          } catch { /* leave undated */ }
-        }))
+        await Promise.all(blocks.slice(b, b + 6).map(async (n) => { times.set(n, await blockTime(n)) }))
       }
       await addPaymentNotes(client, socialPay, classified)
-      const batch = classified.map((r) => ({ ...r, timestamp: times.get(r.blockNumber) ?? Date.now() }))
+      const batch = classified.map((r) => ({ ...r, timestamp: times.get(r.blockNumber) as number }))
       all.push(...batch)
       if (batch.length) onRecords?.(batch)
-      scannedLow = group[group.length - 1][0]
+      scannedLow = group[group.length - 1].lo
       onProgress?.(to - scannedLow + 1n, total)
     } catch (e) {
       if (typeof console !== 'undefined') console.warn('[activity] scan stopped:', String((e as { details?: string })?.details ?? (e as Error)?.message ?? e))
@@ -313,7 +401,7 @@ async function addPaymentNotes(client: PublicClient, socialPay: string | null, r
   const payments = records.filter((r) => r.kind === 'payment' && !r.symbol).slice(0, 12)
   await Promise.all(payments.map(async (r) => {
     try {
-      const receipt = await rpc(() => client.getTransactionReceipt({ hash: r.txHash as `0x${string}` }))
+      const receipt = await rpc(client, () => client.getTransactionReceipt({ hash: r.txHash as `0x${string}` }))
       for (const log of receipt.logs) {
         if (log.address.toLowerCase() !== socialPay.toLowerCase()) continue
         try {

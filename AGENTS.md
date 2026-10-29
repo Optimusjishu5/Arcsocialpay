@@ -51,7 +51,9 @@ The sandbox preview runs the optimized build (`bunx next start -H 0.0.0.0 -p 517
 
 ## Recent changes
 
-- Activity tab: reads the wallet's full history from Arc in the background (paused/resumed from the Activity screen), caches it per wallet in the browser (`src/lib/activityCache.ts`), search/filters/day groups/CSV export. Arc's public RPC allows a burst of ~60 requests, then about one every two seconds, so far-back history is slow by design.
+- Activity tab: reads the wallet's full history from Arc in the background (paused/resumed from the Activity screen) and stores it permanently in the browser's IndexedDB together with scan progress (`src/lib/activityCache.ts`; bump `SCAN_VERSION` there to force a rescan). Search/filters/day groups/CSV export.
+  - Arc logs ALL USDC movement (native sends, ERC-20 transfers, mints, burns) from the system emitter `0xffff...fffE` in 18 decimals; a plain native send emits no log from the ERC-20 contract. The scan reads USDC only from the system emitter (converted to 6 decimals) plus other tokens from their own contracts (`src/lib/onchainActivity.ts`).
+  - RPCs: `rpc.mainnet.arc.io` accepts 8,000-block windows and about a 60-request burst then one request per ~2 s. `rpc.blockdaemon.mainnet.arc.io` accepts 100,000-block windows with no observed limit but keeps only ~2.5 days, so it serves the newest days; older blocks use the primary RPC. Each RPC has its own adaptive pace.
 - Pay > Batch: two-step flow (add recipients, then review and confirm). Components: `src/components/pay/BatchForm.tsx`, `BatchRowItem.tsx`, `BatchReview.tsx`.
 - Social sync (`src/hooks/usePersistentSocial.ts`, `src/utils/socialSync.ts`): a post counts as saved only after the server confirms it; fixes fresh posts being dropped by a poll that started before the save.
 - Known issue: `bun run hardhat:test` fails because Hardhat tries to compile `contracts/test/*.t.sol` (needs forge-std). Foundry tests (`forge test`) are the working suite.
