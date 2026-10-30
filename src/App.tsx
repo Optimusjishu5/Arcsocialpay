@@ -20,6 +20,7 @@ import { SettingsView } from './components/SettingsView'
 import { SwapView } from './components/SwapView'
 import { BridgeView } from './components/BridgeView'
 import { DesktopNav, MobileNav, MobileTopBar } from './components/Navigation'
+import { StudioBar } from './components/StudioBar'
 import { parsePayPrefill } from './utils/payRequests'
 import type { NavView } from './types/index'
 
@@ -159,6 +160,7 @@ export default function App() {
         color: 'var(--ink)',
       }}
     >
+      <StudioBar />
       <div className="flex">
         {/* Desktop Sidebar */}
         <DesktopNav current={nav.view} onNavigate={(v) => navigate(v)} />
