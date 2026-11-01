@@ -10,6 +10,7 @@ import { useTheme, useAppStore, appStore } from '../store/appStore'
 import { useSettings } from '../hooks/useSettings'
 import { Avatar } from './ui/Avatar'
 import { NetworkBadge } from './ui/NetworkBadge'
+import { DisconnectButton, WalletPill } from './ui/WalletPill'
 import { GradientIcon, TONES, type Tone } from './dashboard/ui'
 import type { NavView } from '../types/index'
 
@@ -111,10 +112,11 @@ export function DesktopNav({ current, onNavigate }: Props) {
 
 /** Desktop header with the single wallet button at the top right. */
 export function DesktopTopBar() {
+  const { address, isConnected } = useArcAccount()
   return (
     <div className="hidden md:flex items-center justify-end px-6 py-3 sticky top-0 z-40"
       style={{ background: 'var(--surface)', borderBottom: '1px solid var(--border)', backdropFilter: 'blur(12px)' }}>
-      <ConnectKitButton />
+      {isConnected && address ? <WalletPill address={address} /> : <ConnectKitButton />}
     </div>
   )
 }
@@ -257,6 +259,7 @@ export function MobileTopBar({ title, onNavigate }: { title: string; onNavigate:
           <Settings size={16} />
         </button>
         {isConnected && address ? (
+          <>
           <button onClick={() => onNavigate('profile')} aria-label="Your profile" className="transition-transform hover:scale-105 active:scale-95">
             <span
               className="block rounded-full p-[2px]"
@@ -270,6 +273,8 @@ export function MobileTopBar({ title, onNavigate }: { title: string; onNavigate:
               </span>
             </span>
           </button>
+          <DisconnectButton size={32} />
+          </>
         ) : (
           <ConnectKitButton label="Connect" />
         )}
