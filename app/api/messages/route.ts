@@ -3,15 +3,17 @@ import { createPublicClient, http, isAddress } from 'viem'
 import {
   isTursoConfigured,
   ensureChatSchema,
-  getConversation,
+  getConversationFor,
   listMessages,
   insertMessage,
   updatePaymentStatus,
 } from '@/lib/turso'
 import { verifyChatSignature } from '@/lib/chatAuth'
+import { requireSession } from '@/lib/session'
 import { ARC_RPC_URL } from '@/chains'
 
 const MAX_CONTENT_CHARS = 4000
+const unauthorized = () => NextResponse.json({ error: 'Sign in with your wallet to use chat' }, { status: 401, headers: { 'cache-control': 'no-store' } })
 
 /** A payment card is trusted when its transaction was really sent by the claimed sender. */
 async function paymentSentBy(txHash: string, sender: string): Promise<boolean> {
@@ -32,6 +34,8 @@ export async function GET(req: Request) {
       { status: 200 },
     )
   }
+  const me = requireSession(req)
+  if (!me) return unauthorized()
   try {
     await ensureChatSchema()
     const url = new URL(req.url)
@@ -39,13 +43,15 @@ export async function GET(req: Request) {
     if (!conversationId) {
       return NextResponse.json({ error: 'conversationId query param required' }, { status: 400 })
     }
-    const messages = await listMessages(conversationId)
-    return NextResponse.json({ configured: true, messages })
-  } catch (e) {
-    return NextResponse.json(
-      { error: e instanceof Error ? e.message : 'Failed to list messages' },
-      { status: 500 },
-    )
+    // The query itself only returns rows of conversations the caller belongs to. A conversation that
+    // belongs to someone else looks exactly like one that does not exist.
+    if (!(await getConversationFor(conversationId, me))) {
+      return NextResponse.json({ error: 'Not found' }, { status: 404 })
+    }
+    const messages = await listMessages(conversationId, me)
+    return NextResponse.json({ configured: true, messages }, { headers: { 'cache-control': 'no-store' } })
+  } catch {
+    return NextResponse.json({ error: 'Failed to list messages' }, { status: 500 })
   }
 }
 
@@ -53,6 +59,8 @@ export async function POST(req: Request) {
   if (!isTursoConfigured()) {
     return NextResponse.json({ configured: false, error: 'Turso not configured' }, { status: 503 })
   }
+  const me = requireSession(req)
+  if (!me) return unauthorized()
   try {
     const body = (await req.json()) as {
       id?: string
@@ -68,18 +76,18 @@ export async function POST(req: Request) {
     if (!body?.id || !body?.conversationId || !body?.senderAddress || !isAddress(body.senderAddress)) {
       return NextResponse.json({ error: 'id, conversationId and a valid senderAddress are required' }, { status: 400 })
     }
+    // Messages are saved under the wallet that signed in, never under an address named in the request.
+    if (body.senderAddress.toLowerCase() !== me) {
+      return NextResponse.json({ error: 'You can only send messages as the wallet you signed in with' }, { status: 403 })
+    }
     const content = body.content ?? ''
     if (content.length > MAX_CONTENT_CHARS) {
       return NextResponse.json({ error: 'Message too long' }, { status: 413 })
     }
     await ensureChatSchema()
-    const conv = await getConversation(body.conversationId)
-    if (!conv) {
-      return NextResponse.json({ error: 'Unknown conversation' }, { status: 404 })
-    }
-    // Direct chats: only the two participants may post. (Group membership lives in the client store.)
-    if (!conv.isGroup && !conv.participants.some((p) => p.toLowerCase() === body.senderAddress.toLowerCase())) {
-      return NextResponse.json({ error: 'Sender is not in this conversation' }, { status: 403 })
+    // The sender must be a member of the conversation, in direct chats and in groups alike.
+    if (!(await getConversationFor(body.conversationId, me))) {
+      return NextResponse.json({ error: 'Not found' }, { status: 404 })
     }
     const txHash = typeof body.paymentTx?.txHash === 'string' ? body.paymentTx.txHash : ''
     const createdAt = body.createdAt ?? Date.now()
@@ -110,11 +118,8 @@ export async function POST(req: Request) {
       signature: body.signature,
     })
     return NextResponse.json({ ok: true, id: body.id })
-  } catch (e) {
-    return NextResponse.json(
-      { error: e instanceof Error ? e.message : 'Failed to save message' },
-      { status: 500 },
-    )
+  } catch {
+    return NextResponse.json({ error: 'Failed to save message' }, { status: 500 })
   }
 }
 
@@ -122,17 +127,17 @@ export async function PATCH(req: Request) {
   if (!isTursoConfigured()) {
     return NextResponse.json({ configured: false }, { status: 503 })
   }
+  const me = requireSession(req)
+  if (!me) return unauthorized()
   try {
     const body = (await req.json()) as { txHash?: string; status?: string }
     if (!body?.txHash || !body?.status) {
       return NextResponse.json({ error: 'txHash and status required' }, { status: 400 })
     }
-    await updatePaymentStatus(body.txHash, body.status)
+    const n = await updatePaymentStatus(body.txHash, body.status, me)
+    if (n === 0) return NextResponse.json({ error: 'Not found' }, { status: 404 })
     return NextResponse.json({ ok: true })
-  } catch (e) {
-    return NextResponse.json(
-      { error: e instanceof Error ? e.message : 'Failed to update payment status' },
-      { status: 500 },
-    )
+  } catch {
+    return NextResponse.json({ error: 'Failed to update payment status' }, { status: 500 })
   }
 }

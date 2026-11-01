@@ -6,6 +6,10 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { ConnectKitProvider } from 'connectkit'
 import { Toaster } from 'sonner'
 import { config } from '@/config'
+import { installWalletScope } from '@/lib/walletScope'
+
+// Private chat data follows the connected wallet from the first moment, before anything is drawn.
+installWalletScope(config)
 
 function makeQueryClient() {
   return new QueryClient({

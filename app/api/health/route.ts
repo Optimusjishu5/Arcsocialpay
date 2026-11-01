@@ -9,7 +9,8 @@ export async function GET() {
     try {
       tursoOk = await ensureChatSchema()
     } catch (e) {
-      tursoError = e instanceof Error ? e.message : String(e)
+      tursoError = 'unreachable'
+      void e
     }
   }
   return NextResponse.json({

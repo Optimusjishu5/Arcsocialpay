@@ -44,7 +44,7 @@ interface NavState {
 
 export default function App() {
   const { theme } = useTheme()
-  const { address } = useArcAccount()
+  const { address, isConnected } = useArcAccount()
   const [nav, setNav] = useState<NavState>({ view: 'home' })
   const [payPrefillApplied, setPayPrefillApplied] = useState(false)
 
@@ -93,6 +93,8 @@ export default function App() {
   // Persistent chat: hydrate from Turso + write-through when configured.
   // No-op (localStorage only) when TURSO_* env vars are missing.
   usePersistentChat(address)
+  // Backup to the wallet listener: nothing private stays loaded unless a wallet is connected.
+  useEffect(() => { appStore.setActiveWallet(isConnected ? address : null) }, [address, isConnected])
 
   // Persistent social feed: posts/comments/profiles, same Turso pattern.
   usePersistentSocial(address)

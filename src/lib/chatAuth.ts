@@ -134,3 +134,62 @@ export const USERNAME_PATTERN = /^[A-Za-z0-9_.]{3,20}$/
 export const BIO_MAX = 160
 export const AVATAR_DATA_URL_MAX = 120_000
 export const AVATAR_DATA_URL_PATTERN = /^data:image\/(jpeg|png|webp);base64,[A-Za-z0-9+/=]+$/
+
+// ── Sign-in (proves a visitor controls the wallet they claim) ───────────────
+// Private chat data is only served to a visitor who signed in with that wallet. The server
+// hands out a short-lived challenge, the wallet signs it, and the server answers with a
+// session token tied to that one address. Nothing about who you are is taken from the request.
+
+export const LOGIN_DOMAIN = { name: 'SocialPay Login', version: '1', chainId: ARC_CHAIN_ID } as const
+
+export const LOGIN_TYPES = {
+  ChatLogin: [
+    { name: 'address', type: 'address' },
+    { name: 'nonce', type: 'string' },
+    { name: 'issuedAt', type: 'uint256' },
+    { name: 'expiresAt', type: 'uint256' },
+    { name: 'statement', type: 'string' },
+  ],
+} as const
+
+export const LOGIN_STATEMENT = 'Sign in to read and send your SocialPay chats. This does not cost gas.'
+
+export interface LoginFields {
+  address: `0x${string}`
+  nonce: string
+  issuedAt: number
+  expiresAt: number
+}
+
+export function loginTypedMessage(f: LoginFields) {
+  return {
+    address: f.address,
+    nonce: f.nonce,
+    issuedAt: BigInt(f.issuedAt),
+    expiresAt: BigInt(f.expiresAt),
+    statement: LOGIN_STATEMENT,
+  }
+}
+
+export async function verifyLoginSignature(f: LoginFields, signature: `0x${string}`): Promise<boolean> {
+  if (!isAddress(f.address)) return false
+  const args = {
+    address: f.address,
+    domain: LOGIN_DOMAIN,
+    types: LOGIN_TYPES,
+    primaryType: 'ChatLogin' as const,
+    message: loginTypedMessage(f),
+    signature,
+  }
+  try {
+    if (await verifyTypedData(args)) return true
+  } catch {
+    /* fall through to contract-wallet check */
+  }
+  try {
+    const client = createPublicClient({ transport: http(ARC_RPC_URL) })
+    return await client.verifyTypedData(args)
+  } catch {
+    return false
+  }
+}

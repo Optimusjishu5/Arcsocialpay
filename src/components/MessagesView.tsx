@@ -13,6 +13,7 @@ import { useSocialPay } from '../hooks/useSocialPay'
 import { useChatSigning } from '../hooks/useChatSigning'
 import { GradientIcon, toneStyle, toneVars } from './dashboard/ui'
 import { appStore, useAppStore } from '../store/appStore'
+import { retrySignIn, useChatAuthState } from '../lib/chatSession'
 import { Avatar } from './ui/Avatar'
 import { Button } from './ui/Button'
 import { Modal } from './ui/Modal'
@@ -31,6 +32,26 @@ function getBlockedRecipientReason(recipient: string, myAddress: string): string
 
 interface Props {
   initialConvId?: string
+}
+
+/** Shown only when chats are kept on the server and this wallet has not signed in yet. */
+function ChatSignInNotice() {
+  const state = useChatAuthState()
+  if (state !== 'declined' && state !== 'unavailable' && state !== 'signing') return null
+  return (
+    <div className="mx-3 mb-2 flex items-center gap-2 rounded-xl px-3 py-2 text-xs" style={{ background: 'var(--surface-muted)', color: 'var(--ink-2)' }} role="status">
+      <span className="flex-1">
+        {state === 'signing' ? 'Confirm the free signature in your wallet to load your chats.'
+          : state === 'unavailable' ? 'Chat sync is unavailable right now. Your chats on this device are shown.'
+          : 'Sign in with your wallet to load your saved chats. It is a free signature.'}
+      </span>
+      {state !== 'signing' && (
+        <button onClick={retrySignIn} className="h-8 px-3 rounded-full font-semibold" style={{ background: 'var(--surface-strong)', border: '1px solid var(--border)', color: 'var(--accent)' }}>
+          {state === 'unavailable' ? 'Retry' : 'Sign in'}
+        </button>
+      )}
+    </div>
+  )
 }
 
 export function MessagesView({ initialConvId }: Props) {
@@ -102,6 +123,7 @@ export function MessagesView({ initialConvId }: Props) {
             )}
           </div>
         </div>
+        <ChatSignInNotice />
         {/* List */}
         <div className="flex-1 overflow-y-auto">
           {myConvs.length === 0 ? (

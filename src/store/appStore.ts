@@ -15,6 +15,13 @@ import type {
 import { generateId } from '../utils/format'
 
 const STORAGE_KEY = 'arc-socialpay-v1'
+
+/** Conversation ids are unguessable (128 random bits), so an id can't be found by trying values. */
+function secureId(): string {
+  const bytes = new Uint8Array(16)
+  crypto.getRandomValues(bytes)
+  return Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('')
+}
 const STORE_VERSION = 1
 
 // ── Address helpers (normalize on ingress, compare case-insensitively) ─────
@@ -156,10 +163,79 @@ let saveTimer: ReturnType<typeof setTimeout> | null = null
 let pendingState: AppState | null = null
 let lastQuotaToastAt = 0
 
+// ── Private data is kept per wallet ─────────────────────────────────────────
+// Conversations, messages and notifications belong to one wallet. They live in memory only for the
+// wallet that is connected right now (`activeWallet`) and are saved in that wallet's own storage
+// entry. Posts, profiles and other public data stay in the shared entry. Switching or disconnecting
+// swaps the private part immediately and nothing is deleted: a wallet's history is still there
+// the next time that wallet connects.
+
+const PRIVATE_PREFIX = `${STORAGE_KEY}:private:`
+const UNASSIGNED_KEY = `${PRIVATE_PREFIX}unassigned`
+
+interface PrivateSlice {
+  conversations: Conversation[]
+  messages: Record<string, Message[]>
+  notifications: Notification[]
+}
+
+let activeWallet: string | null = null
+
+/**
+ * A message sent from this device is also filed in the stored entry of the other people in the chat,
+ * so when one of them connects here later they find it (they are authorized participants). It goes
+ * to their saved entry only; it never enters memory while another wallet is connected.
+ */
+function mirrorToOtherParticipants(conv: Conversation, msg: Message): void {
+  try {
+    for (const p of conv.participants ?? []) {
+      const key = String(p).toLowerCase()
+      if (key === activeWallet) continue
+      const b = readBucket(PRIVATE_PREFIX + key)
+      const existing = b.conversations.find((c) => c.id === conv.id)
+      const copy: Conversation = { ...(existing ?? conv), lastMessage: msg, unreadCount: (existing?.unreadCount ?? 0) + 1 }
+      b.conversations = existing ? b.conversations.map((c) => (c.id === conv.id ? copy : c)) : [copy, ...b.conversations]
+      const list = b.messages[conv.id] ?? []
+      if (!list.some((m) => m.id === msg.id)) b.messages[conv.id] = [...list, msg]
+      writeBucket(PRIVATE_PREFIX + key, b)
+    }
+  } catch {
+    // Storage unavailable: the sender's own copy is unaffected.
+  }
+}
+
+const emptySlice = (): PrivateSlice => ({ conversations: [], messages: {}, notifications: [] })
+const sliceOf = (s: AppState): PrivateSlice => ({ conversations: s.conversations, messages: s.messages, notifications: s.notifications })
+
+function readBucket(key: string): PrivateSlice {
+  try {
+    const raw = localStorage.getItem(key)
+    if (!raw) return emptySlice()
+    const p = JSON.parse(raw) as Partial<PrivateSlice>
+    return {
+      conversations: Array.isArray(p.conversations) ? p.conversations : [],
+      messages: p.messages && typeof p.messages === 'object' && !Array.isArray(p.messages) ? p.messages : {},
+      notifications: Array.isArray(p.notifications) ? p.notifications : [],
+    }
+  } catch {
+    return emptySlice()
+  }
+}
+
+function writeBucket(key: string, slice: PrivateSlice): void {
+  localStorage.setItem(key, JSON.stringify(slice))
+}
+
+/** Only the part of the state that is safe to share between wallets in this browser. */
+function publicPart(s: AppState): AppState {
+  return { ...s, conversations: [], messages: {}, notifications: [] }
+}
+
 function tryPersist(state: AppState): void {
   try {
     const capped = capState(state)
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(capped))
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(publicPart(capped)))
+    if (activeWallet) writeBucket(PRIVATE_PREFIX + activeWallet, sliceOf(capped))
   } catch (e) {
     const isQuota =
       (e instanceof DOMException &&
@@ -196,6 +272,61 @@ function scheduleSave(state: AppState): void {
 let globalState: AppState = capState(loadState())
 const listeners = new Set<() => void>()
 
+/**
+ * One-time move of chats saved by earlier versions (all wallets mixed in one entry) into per-wallet
+ * entries. A conversation goes to every wallet that is in it, so each person keeps their history and
+ * nobody gets someone else's. Nothing is deleted.
+ */
+export function splitLegacyPrivateData(state: AppState, read: (key: string) => PrivateSlice = readBucket): Map<string, PrivateSlice> {
+  const buckets = new Map<string, PrivateSlice>()
+  const bucket = (key: string) => {
+    let b = buckets.get(key)
+    if (!b) { b = read(key); buckets.set(key, b) }
+    return b
+  }
+  const addConv = (b: PrivateSlice, c: Conversation) => {
+    if (!b.conversations.some((x) => x.id === c.id)) b.conversations.push(c)
+  }
+  for (const c of state.conversations) {
+    for (const p of c.participants ?? []) {
+      const b = bucket(PRIVATE_PREFIX + String(p).toLowerCase())
+      addConv(b, c)
+      const have = new Map((b.messages[c.id] ?? []).map((m) => [m.id, m]))
+      for (const m of state.messages[c.id] ?? []) have.set(m.id, m)
+      b.messages[c.id] = [...have.values()].sort((x, y) => x.createdAt - y.createdAt)
+    }
+  }
+  const owner = state.currentUserAddress ? PRIVATE_PREFIX + state.currentUserAddress.toLowerCase() : UNASSIGNED_KEY
+  const convById = new Map(state.conversations.map((c) => [c.id, c]))
+  for (const n of state.notifications) {
+    const conv = n.type === 'message' && n.targetId ? convById.get(n.targetId) : undefined
+    // A message alert goes to the people in that chat other than its sender; anything else to the last user.
+    const targets = conv
+      ? (conv.participants ?? []).filter((p) => String(p).toLowerCase() !== String(n.fromAddress).toLowerCase()).map((p) => PRIVATE_PREFIX + String(p).toLowerCase())
+      : [owner]
+    for (const key of targets.length ? targets : [owner]) {
+      const b = bucket(key)
+      if (!b.notifications.some((x) => x.id === n.id)) b.notifications.push(n)
+    }
+  }
+  return buckets
+}
+
+function migrateLegacyPrivateData(): void {
+  try {
+    const s = globalState
+    if (s.conversations.length === 0 && Object.keys(s.messages).length === 0 && s.notifications.length === 0) return
+    const buckets = splitLegacyPrivateData(s)
+    // Write every wallet's entry first; only then drop the mixed copy from the shared entry.
+    for (const [key, b] of buckets) writeBucket(key, b)
+    globalState = { ...s, conversations: [], messages: {}, notifications: [] }
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(publicPart(globalState)))
+  } catch {
+    // If storage is unavailable the data stays where it was; nothing is lost.
+  }
+}
+if (typeof localStorage !== 'undefined') migrateLegacyPrivateData()
+
 function notify() {
   listeners.forEach((fn) => fn())
 }
@@ -215,7 +346,8 @@ if (typeof window !== 'undefined' && typeof window.addEventListener === 'functio
     try {
       const incoming = JSON.parse(e.newValue) as Partial<AppState>
       if (typeof incoming !== 'object' || incoming === null) return
-      globalState = capState({ ...globalState, ...incoming } as AppState)
+      // The shared entry never holds private data, so keep what is in memory for the connected wallet.
+      globalState = capState({ ...globalState, ...incoming, ...sliceOf(globalState) } as AppState)
       notify()
     } catch {
       /* ignore malformed cross-tab payloads */
@@ -227,6 +359,28 @@ if (typeof window !== 'undefined' && typeof window.addEventListener === 'functio
 
 export const appStore = {
   getState: () => globalState,
+
+  /** The wallet whose private data is loaded right now (lowercase), or null when nobody is connected. */
+  getActiveWallet: (): string | null => activeWallet,
+
+  /**
+   * Switches the private data (conversations, messages, notifications) to the given wallet at once.
+   * The previous wallet's data is saved under that wallet and leaves memory, so it can never be shown
+   * to the next wallet. Call with null on disconnect.
+   */
+  setActiveWallet(address: string | null | undefined) {
+    const next = address ? address.toLowerCase() : null
+    if (next === activeWallet) return
+    // Write out anything still waiting to be saved while the old wallet is still the active one.
+    if (saveTimer) { clearTimeout(saveTimer); saveTimer = null }
+    if (pendingState) { const p = pendingState; pendingState = null; tryPersist(p) }
+    else if (activeWallet) { try { writeBucket(PRIVATE_PREFIX + activeWallet, sliceOf(globalState)) } catch { /* storage unavailable */ } }
+    activeWallet = next
+    const loaded = next ? readBucket(PRIVATE_PREFIX + next) : emptySlice()
+    globalState = { ...globalState, ...loaded, currentUserAddress: address ? normalizeAddress(address) : null }
+    scheduleSave(globalState)
+    notify()
+  },
 
   // Theme
   setTheme(theme: 'light' | 'dark') {
@@ -424,7 +578,7 @@ export const appStore = {
       )
       if (selfExisting) return selfExisting
       const conv: Conversation = {
-        id: generateId(),
+        id: secureId(),
         participants: [me],
         unreadCount: 0,
         createdAt: Date.now(),
@@ -442,7 +596,7 @@ export const appStore = {
     )
     if (existing) return existing
     const conv: Conversation = {
-      id: generateId(),
+      id: secureId(),
       participants: [me, other],
       unreadCount: 0,
       createdAt: Date.now(),
@@ -499,6 +653,7 @@ export const appStore = {
         c.id === conversationId ? { ...c, lastMessage: msg } : c,
       ),
     }))
+    mirrorToOtherParticipants(conv, msg)
     return msg
   },
 
@@ -570,7 +725,7 @@ export const appStore = {
       messageCount: 0,
     }
     const conv: Conversation = {
-      id: generateId(),
+      id: secureId(),
       participants: [owner],
       unreadCount: 0,
       createdAt: Date.now(),
@@ -894,8 +1049,10 @@ export const appStore = {
   // Upserts from server so a fresh device/browser hydrates the same chat
   // history. Local writes remain the source of truth for realtime UX;
   // usePersistentChat() calls these after fetching /api/*.
-  importConversations(convs: Conversation[]) {
+  importConversations(convs: Conversation[], forWallet?: string) {
     if (!Array.isArray(convs) || convs.length === 0) return
+    // Results fetched for one wallet are dropped if another wallet is connected by the time they arrive.
+    if (forWallet !== undefined && forWallet.toLowerCase() !== activeWallet) return
     setState((s) => {
       const byId = new Map(s.conversations.map((c) => [c.id, c]))
       for (const c of convs) {
@@ -912,8 +1069,9 @@ export const appStore = {
     })
   },
 
-  importMessages(conversationId: string, list: Message[]) {
+  importMessages(conversationId: string, list: Message[], forWallet?: string) {
     if (!conversationId || !Array.isArray(list) || list.length === 0) return
+    if (forWallet !== undefined && forWallet.toLowerCase() !== activeWallet) return
     setState((s) => {
       const existing = s.messages[conversationId] ?? []
       const byId = new Map(existing.map((m) => [m.id, m]))

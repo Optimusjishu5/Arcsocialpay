@@ -56,9 +56,26 @@ export async function ensureChatSchema(): Promise<boolean> {
     )`,
     `CREATE INDEX IF NOT EXISTS idx_messages_conv ON messages(conversation_id, created_at)`,
     `CREATE INDEX IF NOT EXISTS idx_conversations_created ON conversations(created_at DESC)`,
+    // Who may read a conversation. Every private read joins on this table, so access is decided by the
+    // database query itself and not by anything the caller sends.
+    `CREATE TABLE IF NOT EXISTS conversation_members (
+      conversation_id TEXT NOT NULL,
+      address TEXT NOT NULL,
+      PRIMARY KEY (conversation_id, address),
+      FOREIGN KEY (conversation_id) REFERENCES conversations(id) ON DELETE CASCADE
+    )`,
+    `CREATE INDEX IF NOT EXISTS idx_members_address ON conversation_members(address)`,
   ])
   // Signed messages (EIP-712). Older databases lack the column; adding it twice errors, which is fine.
   await db.execute(`ALTER TABLE messages ADD COLUMN signature TEXT`).catch(() => undefined)
+  // Who created the conversation (only they can remove people from a group).
+  await db.execute(`ALTER TABLE conversations ADD COLUMN created_by TEXT`).catch(() => undefined)
+  // Existing conversations keep their history: their participants become members.
+  await db.execute(
+    `INSERT OR IGNORE INTO conversation_members (conversation_id, address)
+     SELECT c.id, lower(j.value) FROM conversations c, json_each(c.participants) j
+     WHERE json_valid(c.participants)`,
+  )
   schemaEnsured = true
   return true
 }
@@ -95,62 +112,9 @@ function parseJson<T>(raw: unknown, fallback: T): T {
   }
 }
 
-export async function listConversationsForAddress(address: string): Promise<DbConversation[]> {
-  const db = getTursoClient()
-  if (!db) return []
-  await ensureChatSchema()
-  const lower = address.toLowerCase()
-  // Participants stored as JSON array; filter in JS for case-insensitive match
-  // (keeps SQLite simple and avoids LIKE escaping issues).
-  const rs = await db.execute(`SELECT * FROM conversations ORDER BY created_at DESC LIMIT 500`)
-  const out: DbConversation[] = []
-  for (const row of rs.rows) {
-    const participants = parseJson<string[]>(row.participants, [])
-    if (!participants.some((p) => String(p).toLowerCase() === lower)) continue
-    out.push({
-      id: String(row.id),
-      participants,
-      createdAt: Number(row.created_at),
-      isGroup: Number(row.is_group) === 1,
-      groupId: row.group_id ? String(row.group_id) : undefined,
-      lastMessage: parseJson(row.last_message, null),
-      unreadCount: Number(row.unread_count ?? 0),
-    })
-  }
-  return out
-}
+type Row = Record<string, unknown>
 
-// Direct-chat participants are fixed when the conversation is created, so nobody can add themselves later.
-export async function upsertConversation(conv: DbConversation): Promise<void> {
-  const db = getTursoClient()
-  if (!db) return
-  await ensureChatSchema()
-  await db.execute({
-    sql: `INSERT INTO conversations (id, participants, created_at, is_group, group_id, last_message, unread_count)
-          VALUES (?, ?, ?, ?, ?, ?, ?)
-          ON CONFLICT(id) DO UPDATE SET
-            participants=CASE WHEN conversations.is_group = 1 THEN excluded.participants ELSE conversations.participants END,
-            last_message=excluded.last_message,
-            unread_count=excluded.unread_count`,
-    args: [
-      conv.id,
-      JSON.stringify(conv.participants),
-      conv.createdAt,
-      conv.isGroup ? 1 : 0,
-      conv.groupId ?? null,
-      conv.lastMessage ? JSON.stringify(conv.lastMessage) : null,
-      conv.unreadCount ?? 0,
-    ],
-  })
-}
-
-export async function getConversation(id: string): Promise<DbConversation | null> {
-  const db = getTursoClient()
-  if (!db) return null
-  await ensureChatSchema()
-  const rs = await db.execute({ sql: `SELECT * FROM conversations WHERE id = ?`, args: [id] })
-  const row = rs.rows[0]
-  if (!row) return null
+function toConversation(row: Row): DbConversation {
   return {
     id: String(row.id),
     participants: parseJson<string[]>(row.participants, []),
@@ -162,95 +126,206 @@ export async function getConversation(id: string): Promise<DbConversation | null
   }
 }
 
-export async function listMessages(conversationId: string, limit = 500): Promise<DbMessage[]> {
+const lower = (a: string) => a.toLowerCase()
+
+/** True when `address` is a member of the conversation. */
+export async function isMember(conversationId: string, address: string): Promise<boolean> {
+  const db = getTursoClient()
+  if (!db) return false
+  await ensureChatSchema()
+  const rs = await db.execute({
+    sql: `SELECT 1 FROM conversation_members WHERE conversation_id = ? AND address = ? LIMIT 1`,
+    args: [conversationId, lower(address)],
+  })
+  return rs.rows.length > 0
+}
+
+/** Only the conversations `address` belongs to (decided in SQL), newest first. */
+export async function listConversationsForAddress(address: string, limit = 500): Promise<DbConversation[]> {
   const db = getTursoClient()
   if (!db) return []
   await ensureChatSchema()
   const rs = await db.execute({
-    sql: `SELECT * FROM messages WHERE conversation_id = ? ORDER BY created_at ASC LIMIT ?`,
-    args: [conversationId, limit],
+    sql: `SELECT c.* FROM conversations c
+          JOIN conversation_members m ON m.conversation_id = c.id
+          WHERE m.address = ?
+          ORDER BY c.created_at DESC LIMIT ?`,
+    args: [lower(address), limit],
   })
-  return rs.rows.map((row) => ({
-    id: String(row.id),
-    conversationId: String(row.conversation_id),
-    senderAddress: String(row.sender_address),
-    content: String(row.content ?? ''),
-    createdAt: Number(row.created_at),
-    status: String(row.status ?? 'sent'),
-    replyToId: row.reply_to_id ? String(row.reply_to_id) : undefined,
-    paymentTx: parseJson(row.payment_tx, null),
-    signature: row.signature ? String(row.signature) : undefined,
-  }))
+  return rs.rows.map((r) => toConversation(r as Row))
 }
 
+export type ConversationWrite = 'created' | 'updated' | 'forbidden'
+
+/**
+ * Saves a conversation on behalf of `actor` (the verified caller):
+ *  - the actor must be one of the participants of a new conversation;
+ *  - a direct chat's two people are fixed when it is created and never change;
+ *  - for an existing conversation only a member may update it;
+ *  - in a group any member may add people, only the creator may remove them.
+ */
+export async function upsertConversation(conv: DbConversation, actor: string): Promise<ConversationWrite> {
+  const db = getTursoClient()
+  if (!db) return 'forbidden'
+  await ensureChatSchema()
+  const me = lower(actor)
+  const people = [...new Set(conv.participants.map((p) => lower(String(p))))]
+  const existing = await db.execute({ sql: `SELECT id, is_group, created_by FROM conversations WHERE id = ?`, args: [conv.id] })
+  // The preview line is never taken from the caller: it is set from real, signed messages only.
+
+  if (existing.rows.length === 0) {
+    if (!people.includes(me)) return 'forbidden'
+    if (!conv.isGroup && people.length > 2) return 'forbidden'
+    await db.batch([
+      {
+        sql: `INSERT INTO conversations (id, participants, created_at, is_group, group_id, last_message, unread_count, created_by)
+              VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+        args: [conv.id, JSON.stringify(conv.participants), conv.createdAt, conv.isGroup ? 1 : 0, conv.groupId ?? null, null, conv.unreadCount ?? 0, me],
+      },
+      ...people.map((p) => ({ sql: `INSERT OR IGNORE INTO conversation_members (conversation_id, address) VALUES (?, ?)`, args: [conv.id, p] })),
+    ])
+    return 'created'
+  }
+
+  if (!(await isMember(conv.id, me))) return 'forbidden'
+  const row = existing.rows[0] as Row
+  const isGroup = Number(row.is_group) === 1
+  const stmts: { sql: string; args: (string | number | null)[] }[] = [
+    { sql: `UPDATE conversations SET unread_count = ? WHERE id = ?`, args: [conv.unreadCount ?? 0, conv.id] },
+  ]
+  if (isGroup) {
+    const creator = row.created_by ? lower(String(row.created_by)) : null
+    const isCreator = creator !== null && me === creator
+    const current = await db.execute({ sql: `SELECT address FROM conversation_members WHERE conversation_id = ?`, args: [conv.id] })
+    const have = new Set(current.rows.map((r) => String((r as Row).address)))
+    // The creator sets the member list; any other member can only add people.
+    const next = isCreator ? new Set([...people, me]) : new Set([...have, ...people])
+    for (const p of next) {
+      if (!have.has(p)) stmts.push({ sql: `INSERT OR IGNORE INTO conversation_members (conversation_id, address) VALUES (?, ?)`, args: [conv.id, p] })
+    }
+    if (isCreator) {
+      for (const p of have) {
+        if (!next.has(p)) stmts.push({ sql: `DELETE FROM conversation_members WHERE conversation_id = ? AND address = ?`, args: [conv.id, p] })
+      }
+    }
+    stmts.push({ sql: `UPDATE conversations SET participants = ? WHERE id = ?`, args: [JSON.stringify([...next]), conv.id] })
+  }
+  await db.batch(stmts)
+  return 'updated'
+}
+
+/** The conversation, but only when `address` is a member (otherwise null, as if it did not exist). */
+export async function getConversationFor(id: string, address: string): Promise<DbConversation | null> {
+  const db = getTursoClient()
+  if (!db) return null
+  await ensureChatSchema()
+  const rs = await db.execute({
+    sql: `SELECT c.* FROM conversations c
+          JOIN conversation_members m ON m.conversation_id = c.id
+          WHERE c.id = ? AND m.address = ?`,
+    args: [id, lower(address)],
+  })
+  return rs.rows[0] ? toConversation(rs.rows[0] as Row) : null
+}
+
+/** Messages of a conversation, only when `address` is a member (an outsider gets an empty list). */
+export async function listMessages(conversationId: string, address: string, limit = 500): Promise<DbMessage[]> {
+  const db = getTursoClient()
+  if (!db) return []
+  await ensureChatSchema()
+  const rs = await db.execute({
+    sql: `SELECT msg.* FROM messages msg
+          JOIN conversation_members m ON m.conversation_id = msg.conversation_id
+          WHERE msg.conversation_id = ? AND m.address = ?
+          ORDER BY msg.created_at ASC LIMIT ?`,
+    args: [conversationId, lower(address), limit],
+  })
+  return rs.rows.map((r) => {
+    const row = r as Row
+    return {
+      id: String(row.id),
+      conversationId: String(row.conversation_id),
+      senderAddress: String(row.sender_address),
+      content: String(row.content ?? ''),
+      createdAt: Number(row.created_at),
+      status: String(row.status ?? 'sent'),
+      replyToId: row.reply_to_id ? String(row.reply_to_id) : undefined,
+      paymentTx: parseJson(row.payment_tx, null),
+      signature: row.signature ? String(row.signature) : undefined,
+    }
+  })
+}
+
+/** Stores a message. The caller must already have checked the sender is a member. */
 export async function insertMessage(msg: DbMessage): Promise<void> {
   const db = getTursoClient()
   if (!db) return
   await ensureChatSchema()
-  await db.execute({
-    // Existing rows are never overwritten: a stored message cannot be edited by re-posting its id.
-    sql: `INSERT INTO messages (id, conversation_id, sender_address, content, created_at, status, reply_to_id, payment_tx, signature)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-          ON CONFLICT(id) DO UPDATE SET
-            status=excluded.status`,
-    args: [
-      msg.id,
-      msg.conversationId,
-      msg.senderAddress,
-      msg.content,
-      msg.createdAt,
-      msg.status,
-      msg.replyToId ?? null,
-      msg.paymentTx ? JSON.stringify(msg.paymentTx) : null,
-      msg.signature ?? null,
-    ],
-  })
-  // Keep conversation last_message in sync
-  await db.execute({
-    sql: `UPDATE conversations SET last_message = ? WHERE id = ?`,
-    args: [
-      JSON.stringify({
-        id: msg.id,
-        conversationId: msg.conversationId,
-        senderAddress: msg.senderAddress,
-        content: msg.content,
-        createdAt: msg.createdAt,
-        status: msg.status,
-        replyToId: msg.replyToId,
-        paymentTx: msg.paymentTx ?? undefined,
-      }),
-      msg.conversationId,
-    ],
-  })
+  await db.batch([
+    {
+      // An existing message is never rewritten; only its sender may touch its status.
+      sql: `INSERT INTO messages (id, conversation_id, sender_address, content, created_at, status, reply_to_id, payment_tx, signature)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(id) DO UPDATE SET status=excluded.status
+            WHERE messages.sender_address = excluded.sender_address AND messages.conversation_id = excluded.conversation_id`,
+      args: [
+        msg.id, msg.conversationId, msg.senderAddress, msg.content, msg.createdAt, msg.status,
+        msg.replyToId ?? null, msg.paymentTx ? JSON.stringify(msg.paymentTx) : null, msg.signature ?? null,
+      ],
+    },
+    {
+      sql: `UPDATE conversations SET last_message = ? WHERE id = ?`,
+      args: [
+        JSON.stringify({
+          id: msg.id, conversationId: msg.conversationId, senderAddress: msg.senderAddress, content: msg.content,
+          createdAt: msg.createdAt, status: msg.status, replyToId: msg.replyToId, paymentTx: msg.paymentTx ?? undefined,
+        }),
+        msg.conversationId,
+      ],
+    },
+  ])
 }
 
-export async function markConversationRead(conversationId: string): Promise<void> {
+/** Marks a conversation read, only for a member. Returns whether anything was updated. */
+export async function markConversationRead(conversationId: string, address: string): Promise<boolean> {
   const db = getTursoClient()
-  if (!db) return
+  if (!db) return false
   await ensureChatSchema()
-  await db.execute({
-    sql: `UPDATE conversations SET unread_count = 0 WHERE id = ?`,
-    args: [conversationId],
+  const rs = await db.execute({
+    sql: `UPDATE conversations SET unread_count = 0
+          WHERE id = ? AND EXISTS (SELECT 1 FROM conversation_members m WHERE m.conversation_id = conversations.id AND m.address = ?)`,
+    args: [conversationId, lower(address)],
   })
+  return rs.rowsAffected > 0
 }
 
-export async function updatePaymentStatus(txHash: string, status: string): Promise<void> {
+const PAYMENT_STATUSES = new Set(['pending', 'confirmed', 'failed'])
+
+/** Updates the status shown on a payment card, only in conversations the caller belongs to. */
+export async function updatePaymentStatus(txHash: string, status: string, address: string): Promise<number> {
   const db = getTursoClient()
-  if (!db) return
+  if (!db) return 0
+  if (!PAYMENT_STATUSES.has(status)) return 0
   await ensureChatSchema()
-  const rs = await db.execute(`SELECT id, payment_tx FROM messages WHERE payment_tx IS NOT NULL LIMIT 1000`)
+  const rs = await db.execute({
+    sql: `SELECT msg.id, msg.payment_tx FROM messages msg
+          JOIN conversation_members m ON m.conversation_id = msg.conversation_id
+          WHERE msg.payment_tx IS NOT NULL AND m.address = ? LIMIT 1000`,
+    args: [lower(address)],
+  })
   const needle = txHash.toLowerCase()
+  let updated = 0
   for (const row of rs.rows) {
-    const pay = parseJson<Record<string, unknown> | null>(row.payment_tx, null)
+    const pay = parseJson<Record<string, unknown> | null>((row as Row).payment_tx, null)
     if (!pay) continue
-    const hash = String((pay as { txHash?: unknown }).txHash ?? '').toLowerCase()
-    if (hash !== needle) continue
-    const next = { ...(pay as object), status }
+    if (String((pay as { txHash?: unknown }).txHash ?? '').toLowerCase() !== needle) continue
     await db.execute({
       sql: `UPDATE messages SET payment_tx = ?, status = ? WHERE id = ?`,
-      args: [JSON.stringify(next), 'sent', String(row.id)],
+      args: [JSON.stringify({ ...(pay as object), status }), 'sent', String((row as Row).id)],
     })
+    updated++
   }
+  return updated
 }
 
 // ── Social feed persistence (posts / comments / profiles) ───────────────────
