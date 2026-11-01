@@ -19,7 +19,7 @@ import { ActivityView } from './components/ActivityView'
 import { SettingsView } from './components/SettingsView'
 import { SwapView } from './components/SwapView'
 import { BridgeView } from './components/BridgeView'
-import { DesktopNav, MobileNav, MobileTopBar } from './components/Navigation'
+import { DesktopNav, DesktopTopBar, MobileNav, MobileTopBar } from './components/Navigation'
 import { StudioBar } from './components/StudioBar'
 import { parsePayPrefill } from './utils/payRequests'
 import type { NavView } from './types/index'
@@ -60,6 +60,7 @@ export default function App() {
         if (prefill.amount) extra.amount = prefill.amount
         if (prefill.memo) extra.memo = prefill.memo
         if (prefill.expiresAt) extra.exp = String(prefill.expiresAt)
+        if (prefill.via) extra.via = prefill.via
         setNav({ view: 'pay', extra })
       }
     } catch {
@@ -123,6 +124,7 @@ export default function App() {
             initialRecipient={nav.extra?.recipient && isAddress(nav.extra.recipient) ? nav.extra.recipient : undefined}
             initialAmount={nav.extra?.amount}
             initialNote={nav.extra?.memo}
+            initialVia={nav.extra?.via === 'split' ? 'split' : undefined}
             onNavigate={navigate}
           />
         )
@@ -169,6 +171,7 @@ export default function App() {
         <div className="flex-1 min-w-0 flex flex-col">
           {/* Mobile top bar */}
           <MobileTopBar title={VIEW_TITLES[nav.view]} onNavigate={navigate} />
+          <DesktopTopBar />
 
           {/* Page content */}
           <main className="flex-1 pb-16 md:pb-0">

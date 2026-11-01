@@ -12,11 +12,11 @@ import { AmountCard, FlipButton, Reveal, SlippagePicker } from './SwapPanel'
 import { TokenPicker } from './TokenPicker'
 import { Notices, QuoteDetails, ROUTE_META, RouteIcon } from './SwapParts'
 
-const ALL_ROUTES: readonly SwapProviderId[] = ['kyber', 'uniswap', 'lifi']
+const ALL_ROUTES: readonly SwapProviderId[] = ['kyber', 'uniswap']
 const usd = (n?: number) => (n === undefined ? undefined : `≈ $${n < 0.01 && n > 0 ? '<0.01' : n.toFixed(2)}`)
 
 /**
- * "Best price": asks KyberSwap, Uniswap and LI.FI at once, picks the route that
+ * "Best price": asks KyberSwap and Uniswap at once, picks the route that
  * pays the most, and lets you choose another route if you prefer.
  */
 export function BestPriceView({ routes = ALL_ROUTES }: { routes?: readonly SwapProviderId[] }) {
@@ -74,19 +74,20 @@ export function BestPriceView({ routes = ALL_ROUTES }: { routes?: readonly SwapP
             tokens={[]}
             onOpenPicker={() => setPicker('out')}
             onToken={() => undefined}
-            loading={e.quoting}
+            loading={e.quoting && !e.selected}
             dim={!e.fresh && !!e.results}
             balanceText={e.balOut !== undefined ? `${formatTokenAmount(e.balOut, e.tokenOut.decimals, 4)} ${e.tokenOut.symbol}` : undefined}
             subText={e.fresh ? usd(e.usdOut) : undefined}
           />
         </div>
 
-        {/* Every route's price, best first. Tap one to use it instead. */}
-        <Reveal show={e.fresh && !!e.results && routes.length > 1}>
+        {/* Every route's price, best first. Routes still loading show a placeholder; tap a price to use that route. */}
+        <Reveal show={routes.length > 1 && e.amountIn !== null && (e.fresh || e.quoting)}>
           <div className="space-y-1.5" role="radiogroup" aria-label="Swap route">
-            {e.results?.slice().sort((a, b) => Number((b.quote?.amountOut ?? -1n) - (a.quote?.amountOut ?? -1n))).map((r, i) => {
+            {(e.fresh ? (e.results ?? []) : []).slice().sort((a, b) => Number((b.quote?.amountOut ?? -1n) - (a.quote?.amountOut ?? -1n))).map((r, i) => {
               const q = r.quote
               const active = !!q && e.selectedId === r.id
+              const allIn = !e.quoting || (e.results?.length ?? 0) >= routes.length
               return (
                 <button
                   key={r.id}
@@ -106,7 +107,7 @@ export function BestPriceView({ routes = ALL_ROUTES }: { routes?: readonly SwapP
                   <span className="flex-1 min-w-0">
                     <span className="flex items-center gap-2 text-sm font-semibold" style={{ color: 'var(--ink)' }}>
                       {ROUTE_META[r.id].name}
-                      {q && i === 0 && <span className="text-[10px] px-1.5 py-0.5 rounded-full font-semibold" style={{ background: 'var(--success-bg)', color: 'var(--success)' }}>Best</span>}
+                      {q && i === 0 && allIn && <span className="text-[10px] px-1.5 py-0.5 rounded-full font-semibold" style={{ background: 'var(--success-bg)', color: 'var(--success)' }}>Best</span>}
                     </span>
                     {!q && <span className="block text-[11px] truncate" style={{ color: 'var(--muted)' }}>{r.error}</span>}
                   </span>
@@ -114,6 +115,13 @@ export function BestPriceView({ routes = ALL_ROUTES }: { routes?: readonly SwapP
                 </button>
               )
             })}
+            {e.quoting && routes.filter((r) => !(e.fresh && e.results?.some((x) => x.id === r))).map((r) => (
+              <div key={`wait-${r}`} className="w-full flex items-center gap-3 p-2.5 rounded-2xl" style={{ background: 'var(--surface)', border: '1.5px solid var(--border)' }} aria-busy="true">
+                <RouteIcon id={r} size={30} />
+                <span className="flex-1 text-sm font-semibold" style={{ color: 'var(--ink)' }}>{ROUTE_META[r].name}</span>
+                <span className="h-5 w-24 rounded-lg animate-pulse" style={{ background: 'color-mix(in srgb, var(--tone-from) 22%, var(--surface-strong))' }} />
+              </div>
+            ))}
             {e.choice !== 'auto' && (
               <button type="button" onClick={() => e.setChoice('auto')} className="text-xs underline" style={{ color: 'var(--muted)' }}>Use the best price automatically</button>
             )}
@@ -152,7 +160,7 @@ export function BestPriceView({ routes = ALL_ROUTES }: { routes?: readonly SwapP
         <Button
           className="w-full !h-14 !rounded-full"
           size="lg"
-          loading={working || (e.quoting && e.amountIn !== null)}
+          loading={working || (e.quoting && !e.selected)}
           disabled={!ready || working}
           onClick={() => void e.swap()}
         >

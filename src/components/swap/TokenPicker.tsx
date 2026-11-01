@@ -112,7 +112,7 @@ function PickerBody({ onClose, tokens, balances, selected, onSelect, allowCustom
                 className="w-full flex items-center gap-3 p-2.5 rounded-xl text-left min-h-[56px] transition-colors hover:bg-[var(--surface-muted)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus)]"
                 style={isSel ? { background: 'var(--surface-muted)' } : undefined}
               >
-                <TokenLogo symbol={t.symbol} logoURI={t.logoURI} size={36} />
+                <TokenLogo symbol={t.symbol} logoURI={t.logoURI} address={t.address} size={36} />
                 <span className="flex-1 min-w-0">
                   <span className="flex items-center gap-1.5 text-sm font-semibold" style={{ color: 'var(--ink)' }}>
                     {t.symbol}{isSel && <Check size={13} style={{ color: 'var(--success)' }} />}

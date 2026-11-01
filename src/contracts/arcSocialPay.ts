@@ -202,3 +202,15 @@ export const SOCIAL_PAY_ADDRESS: string =
 export function isSocialPayConfigured(): boolean {
   return /^0x[0-9a-fA-F]{40}$/.test(SOCIAL_PAY_ADDRESS)
 }
+
+/**
+ * The ArcSocialPay deployment on Arc Mainnet (owner-verified onchain, see README).
+ * Shown in Settings even before NEXT_PUBLIC_SOCIAL_PAY_ADDRESS is set; payments only
+ * route through it once that variable is set.
+ */
+export const SOCIAL_PAY_DEPLOYED_ADDRESS = '0x3b61FC789342B02Ae9DA3Bcece910AFaAd40bf54' as const
+
+/** The address Settings shows: the configured one, else the known deployment. */
+export function socialPayDisplayAddress(): string {
+  return isSocialPayConfigured() ? SOCIAL_PAY_ADDRESS : SOCIAL_PAY_DEPLOYED_ADDRESS
+}

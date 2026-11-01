@@ -1,38 +1,25 @@
 import { useState } from 'react'
 import { motion } from 'framer-motion'
 import {
-  ArrowDownLeft, ArrowLeftRight, ArrowUpRight, Activity, Compass, HandCoins, Layers,
-  Heart, MessageCircle, Send, Sparkles, Users, CalendarClock, Wallet, Waypoints,
+  ArrowDownLeft, ArrowLeftRight, Compass,
+  Heart, MessageCircle, Send, Waypoints,
 } from 'lucide-react'
-import { ConnectKitButton } from 'connectkit'
-import { TokenUSDC } from '@web3icons/react'
 import { useArcAccount, useUsdcBalance } from '../hooks/useArcWallet'
 import { appStore, useAppStore, filterConversationsForAddress, isSameAddress } from '../store/appStore'
 import { useTxReconciliationOnLoad, useUsdcTransferWatcher, useBackfillMissingTxRecords } from '../hooks/useTxHistory'
 import { Avatar } from './ui/Avatar'
 import { BalanceCard } from './dashboard/BalanceCard'
-import { ActionTile, EmptyRow, GradientIcon, Section, StatCard, glassCard, type Tone } from './dashboard/ui'
-import { formatAddress, formatTimestamp, formatUsdcDisplay } from '../utils/format'
-import { parseUsdc } from '@/onchain-money'
+import { LandingHero } from './dashboard/LandingHero'
+import { RecentActivity } from './dashboard/RecentActivity'
+import { Typewriter } from './dashboard/Typewriter'
+import { ActionTile, EmptyRow, Section } from './dashboard/ui'
+import { formatAddress, formatTimestamp } from '../utils/format'
 import { copyText } from '../utils/copy'
-import type { NavView, TxRecord } from '../types/index'
+import type { NavView } from '../types/index'
 import { useWalletActivity } from '../hooks/useWalletActivity'
-import { ActivityRow } from './activity/ActivityRow'
-
-/** How many of the newest entries the Dashboard lists; Activity has the rest. */
-const RECENT_LIMIT = 25
 
 interface Props {
   onNavigate: (view: NavView, extra?: Record<string, string>) => void
-}
-
-/** Sum of confirmed payments from the local history, in exact 6-decimal units. */
-function totalRaw(txs: TxRecord[]): bigint {
-  let sum = 0n
-  for (const t of txs) {
-    try { sum += parseUsdc(t.amount) } catch { /* skip malformed legacy rows */ }
-  }
-  return sum
 }
 
 export function Dashboard({ onNavigate }: Props) {
@@ -40,7 +27,7 @@ export function Dashboard({ onNavigate }: Props) {
   const { display, isLoading: balanceLoading, known: balanceKnown, stale: balanceStale, refetch } = useUsdcBalance(address)
   const { conversations, posts } = useAppStore()
   // Same list as the Pay and Activity screens: every transaction plus social activity.
-  const { transactions: allTxs, entries } = useWalletActivity(address)
+  const { entries } = useWalletActivity(address)
   const [copied, setCopied] = useState(false)
 
   // Reconcile pending history on load and refresh the balance on every USDC transfer.
@@ -48,13 +35,7 @@ export function Dashboard({ onNavigate }: Props) {
   useBackfillMissingTxRecords()
   useUsdcTransferWatcher(address, () => { void refetch() })
 
-  const recent = entries.slice(0, RECENT_LIMIT)
-  // Totals count USDC payments only; swaps and bridges are not money sent to or received from someone.
-  const confirmed = allTxs.filter((t) => t.status === 'confirmed' && (!t.kind || t.kind === 'payment') && (!t.symbol || t.symbol === 'USDC'))
-  const sentTotal = totalRaw(confirmed.filter((t) => isSameAddress(t.fromAddress, address)))
-  const receivedTotal = totalRaw(confirmed.filter((t) => !isSameAddress(t.fromAddress, address)))
   const recentConvs = filterConversationsForAddress(conversations, address).slice(0, 3)
-  const unread = filterConversationsForAddress(conversations, address).reduce((n, c) => n + (c.unreadCount ?? 0), 0)
   // Newest first, whatever order the list was merged in (own posts, other devices, the server).
   const recentPosts = [...posts].sort((a, b) => b.createdAt - a.createdAt).slice(0, 3)
 
@@ -102,46 +83,12 @@ export function Dashboard({ onNavigate }: Props) {
           <ActionTile icon={Waypoints} tone="amber" label="Bridge" onClick={() => onNavigate('bridge')} />
         </motion.div>
 
-        <motion.div variants={item} className="grid grid-cols-4 gap-2">
-          {([
-            { icon: HandCoins, tone: 'rose', label: 'Request', mode: 'request' },
-            { icon: Users, tone: 'teal', label: 'Split', mode: 'split' },
-            { icon: Layers, tone: 'indigo', label: 'Batch', mode: 'batch' },
-            { icon: CalendarClock, tone: 'pink', label: 'Schedule', mode: 'schedule' },
-          ] as const).map(({ icon: Icon, tone, label, mode }) => (
-            <button key={label} onClick={() => onNavigate('pay', { mode })}
-              className="flex items-center gap-2 h-11 px-2.5 rounded-xl text-xs font-semibold transition-transform active:scale-95 hover:-translate-y-0.5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus)]"
-              style={{ ...glassCard, color: 'var(--ink)' }}>
-              <GradientIcon icon={Icon} tone={tone} size={26} />
-              <span className="truncate">{label}</span>
-            </button>
-          ))}
-        </motion.div>
-
-        <motion.div variants={item} className="grid grid-cols-3 gap-3">
-          <StatCard icon={ArrowDownLeft} tone="green" label="Received" value={formatUsdcDisplay(receivedTotal)} unit="USDC" />
-          <StatCard icon={ArrowUpRight} tone="rose" label="Sent" value={formatUsdcDisplay(sentTotal)} unit="USDC" />
-          <StatCard icon={MessageCircle} tone="violet" label="Unread" value={String(unread)} />
-        </motion.div>
-
         <motion.div variants={item}>
-          <Section title="Recent activity" icon={Activity} tone="blue"
-            action={entries.length > 0 ? <LinkButton onClick={() => onNavigate('activity')}>View all {entries.length.toLocaleString('en-US')}</LinkButton> : undefined}>
-            {recent.length === 0 ? (
-              <EmptyRow icon={Wallet} text="No activity yet" cta="Send your first payment" onCta={() => onNavigate('pay', { mode: 'send' })} />
-            ) : (
-              <div className="max-h-[30rem] overflow-y-auto overscroll-contain pr-0.5" role="list" aria-label="Recent activity">
-                {recent.map((e) => <ActivityRow key={e.id} entry={e} />)}
-                {entries.length > recent.length && (
-                  <button onClick={() => onNavigate('activity')}
-                    className="w-full h-11 mt-1 rounded-2xl text-sm font-semibold transition-colors hover:bg-[var(--surface-muted)]"
-                    style={{ color: 'var(--accent)' }}>
-                    See {(entries.length - recent.length).toLocaleString('en-US')} more in Activity
-                  </button>
-                )}
-              </div>
-            )}
-          </Section>
+          <RecentActivity
+            entries={entries}
+            onViewAll={() => onNavigate('activity')}
+            onSend={() => onNavigate('pay', { mode: 'send' })}
+          />
         </motion.div>
 
         <motion.div variants={item}>
@@ -220,33 +167,14 @@ function Landing() {
       <Ambient />
       <motion.div initial={{ opacity: 0, y: 24 }} animate={{ opacity: 1, y: 0 }}
         transition={{ type: 'spring', damping: 24, stiffness: 260 }} className="relative z-10 text-center">
-        <div className="w-24 h-24 mx-auto rounded-[30px] flex items-center justify-center mb-6"
-          style={{
-            background: 'linear-gradient(135deg, #3b82f6 0%, #7c3aed 100%)',
-            boxShadow: '0 24px 50px -16px rgba(79,70,229,0.7), inset 0 1px 0 rgba(255,255,255,0.4)',
-          }}>
-          <TokenUSDC variant="branded" size={52} />
-        </div>
-        <h1 className="display font-bold text-4xl mb-2" style={{ color: 'var(--ink)', letterSpacing: '-0.035em' }}>SocialPay</h1>
-        <p className="text-base mb-8 max-w-xs mx-auto" style={{ color: 'var(--muted)' }}>
-          Chat, post and pay with USDC on Arc. Connect a wallet to get started.
-        </p>
-        <ConnectKitButton label="Connect wallet" />
+        <LandingHero />
+        <h1 className="display font-bold text-4xl mt-2 mb-2" style={{ color: 'var(--ink)', letterSpacing: '-0.035em' }}>SocialPay</h1>
+        <Typewriter
+          text="Pay, Swap, Bridge, Message & Explore with USDC on Arc. Tap Connect at the top right to get started."
+          className="w-full max-w-sm mx-auto px-2 text-[15px] leading-6 sm:text-base min-h-[6rem] sm:min-h-[4.5rem]"
+          style={{ color: 'var(--muted)' }}
+        />
       </motion.div>
-
-      <div className="relative z-10 grid grid-cols-2 sm:grid-cols-4 gap-3 w-full max-w-md">
-        {([
-          { icon: MessageCircle, tone: 'violet', label: 'Chat + pay' },
-          { icon: Compass, tone: 'amber', label: 'Social feed' },
-          { icon: ArrowLeftRight, tone: 'blue', label: 'Swap + bridge' },
-          { icon: Sparkles, tone: 'green', label: 'Gas in USDC' },
-        ] as { icon: typeof Send; tone: Tone; label: string }[]).map(({ icon, tone, label }) => (
-          <div key={label} className="flex flex-col items-center gap-2 p-4 rounded-2xl" style={glassCard}>
-            <GradientIcon icon={icon} tone={tone} />
-            <span className="text-xs font-semibold text-center" style={{ color: 'var(--ink-2)' }}>{label}</span>
-          </div>
-        ))}
-      </div>
     </div>
   )
 }

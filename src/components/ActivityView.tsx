@@ -11,7 +11,7 @@ import { EmptyState } from './ui/EmptyState'
 import { Button } from './ui/Button'
 import { StatCard, glassCard } from './dashboard/ui'
 import { ActivityRow } from './activity/ActivityRow'
-import { FILTERS, groupByDay, matchesQuery, toCsv, type Filter } from './activity/entries'
+import { CATEGORY_META, FILTERS, countByFilter, groupByDay, matchesQuery, toCsv, type Filter } from './activity/entries'
 import { formatUsdcDisplay, isSameAddress } from '../utils/format'
 import { parseUsdc } from '@/onchain-money'
 
@@ -45,16 +45,7 @@ export function ActivityView() {
   // The same list the Dashboard and Pay screens use, so all three always agree.
   const { entries } = useWalletActivity(address)
 
-  const counts = useMemo(() => {
-    const c: Record<Filter, number> = { all: entries.length, payments: 0, swaps: 0, bridges: 0, social: 0 }
-    for (const e of entries) {
-      if (e.kind === 'payment') c.payments++
-      else if (e.kind === 'swap') c.swaps++
-      else if (e.kind === 'bridge') c.bridges++
-      else c.social++
-    }
-    return c
-  }, [entries])
+  const counts = useMemo(() => countByFilter(entries), [entries])
 
   const totals = useMemo(() => {
     let received = 0n
@@ -72,9 +63,9 @@ export function ActivityView() {
   }, [entries, address])
 
   const shown = useMemo(() => {
-    const kind = FILTERS.find((f) => f.id === filter)?.kind
+    const category = FILTERS.find((f) => f.id === filter)?.category
     const q = query.trim()
-    return entries.filter((e) => (!kind || e.kind === kind) && matchesQuery(e, q))
+    return entries.filter((e) => (!category || e.category === category) && matchesQuery(e, q))
   }, [entries, filter, query])
 
   // The page size resets whenever the filter, search or wallet changes.
@@ -171,6 +162,7 @@ export function ActivityView() {
                 color: active ? '#fff' : 'var(--muted)',
                 border: '1px solid var(--border)',
               }}>
+              {f.category && (() => { const Icon = CATEGORY_META[f.category].icon; return <Icon size={14} aria-hidden /> })()}
               {f.label}
               <span className="tabnum text-xs opacity-70">{counts[f.id]}</span>
             </button>
@@ -219,8 +211,16 @@ export function ActivityView() {
         </div>
       )}
 
+      {chain.source === 'nodes' && !chain.complete && (
+        <p className="text-xs px-3 py-2 rounded-xl text-pretty" style={{ background: 'var(--surface-muted)', color: 'var(--muted)' }}>
+          The Arc explorer could not be reached, so history is being read from Arc nodes directly. That is slower and can miss older or other-token transactions until it finishes.
+        </p>
+      )}
       <p className="text-xs px-1 text-pretty" style={{ color: 'var(--subtle)' }}>
-        Payments, swaps and bridges are read from the Arc network and confirmed by transaction hash. Posts, comments and reactions are app data stored off-chain.
+        {chain.source === 'explorer'
+          ? 'Sends, receives, swaps, bridges and other transactions are read from the Arc explorer index and match it by transaction hash.'
+          : 'Sends, receives, swaps and bridges are read from the Arc network and confirmed by transaction hash.'}{' '}
+        Posts, comments and reactions are app data stored off-chain.
       </p>
     </motion.div>
   )

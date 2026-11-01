@@ -102,7 +102,12 @@ export interface Group {
 export type TxStatus = 'pending' | 'confirmed' | 'failed'
 export type TxDirection = 'sent' | 'received'
 /** What a history entry is. Missing means a plain payment. */
-export type TxKind = 'payment' | 'swap' | 'bridge'
+/**
+ * 'batch', 'request', 'split' and 'schedule' are payments sent from those Pay tools
+ * (paid from a batch list, a payment-request link, a split-bill link, or a scheduled reminder).
+ * 'other' is a transaction that moved no tokens, such as an approval or a contract call.
+ */
+export type TxKind = 'payment' | 'swap' | 'bridge' | 'batch' | 'request' | 'split' | 'schedule' | 'other'
 
 export interface TxRecord {
   id: string

@@ -70,7 +70,7 @@ export function SplitBillForm({ address }: { address: string }) {
                 Your own share is {split.organiserText} USDC. Any leftover fraction stays with you, so the parts always add up to the total.
               </p>
             </div>
-            <ShareLinkBox path={buildRequestPath(address, split.shareText, memo, expiresAt)} label="Link to send your group"
+            <ShareLinkBox path={buildRequestPath(address, split.shareText, memo, expiresAt, 'split')} label="Link to send your group"
               hint={`Everyone who opens it pays ${split.shareText} USDC to your wallet.`} />
           </>
         ) : (

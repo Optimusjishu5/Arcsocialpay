@@ -17,6 +17,8 @@ export interface ArcToken {
   name: string
   decimals: number
   logoURI?: string
+  /** A second logo from another list, tried when the first fails to load. */
+  logoAlt?: string
   priceUSD?: number
   sources: TokenSource[]
 }
@@ -25,7 +27,7 @@ export interface ArcToken {
 export const ARC_MULTICALL3: Address = '0xcA11bde05977b3631167028862bE2a173976CA11'
 
 const BUILTIN: ArcToken[] = ([
-  { address: '0x3600000000000000000000000000000000000000', symbol: 'USDC', name: 'USD Coin', decimals: 6, logoURI: '/tokens/usdc.png', sources: ['uniswap'] },
+  { address: '0x3600000000000000000000000000000000000000', symbol: 'USDC', name: 'USD Coin', decimals: 6, logoURI: '/tokens/usdc.png', priceUSD: 1, sources: ['uniswap'] },
   { address: '0xbEf5f6d51CB62b58e6A8f77868681825C6fe21c1', symbol: 'EURC', name: 'Euro Coin', decimals: 6, logoURI: '/tokens/eurc.png', sources: ['uniswap'] },
   { address: '0x171A4217b86A807A64eB94757db6849fb4bDbAA0', symbol: 'cirBTC', name: 'Circle Wrapped Bitcoin', decimals: 8, logoURI: '/tokens/cirbtc.png', sources: ['uniswap'] },
 ] as ArcToken[]).map((t) => ({ ...t, address: getAddress(t.address.toLowerCase()) }))
@@ -35,7 +37,7 @@ export const EURC_TOKEN = BUILTIN[1]
 /** Arc's gas is USDC, so a swap that spends all of it would leave nothing for the fee. */
 export const GAS_RESERVE_RAW = 50_000n // 0.05 USDC
 
-const CACHE_KEY = 'socialpay.arcTokens.v2'
+const CACHE_KEY = 'socialpay.arcTokens.v3'
 const CACHE_MS = 30 * 60 * 1000
 const PRIORITY = ['USDC', 'EURC', 'cirBTC', 'WETH']
 
@@ -85,7 +87,9 @@ function merge(lifi: LifiToken[], kyber: KyberToken[]): ArcToken[] {
     const price = t.priceUSD ? Number(t.priceUSD) : undefined
     if (prev) {
       if (!prev.sources.includes(source)) prev.sources.push(source)
-      prev.logoURI ??= cleanLogo(t.logoURI)
+      const logo = cleanLogo(t.logoURI)
+      if (!prev.logoURI) prev.logoURI = logo
+      else if (logo && logo !== prev.logoURI && !prev.logoAlt) prev.logoAlt = logo
       if (prev.priceUSD === undefined && price !== undefined && Number.isFinite(price)) prev.priceUSD = price
       return
     }
@@ -98,10 +102,14 @@ function merge(lifi: LifiToken[], kyber: KyberToken[]): ArcToken[] {
   kyber.forEach((t) => upsert(t, 'kyber'))
   lifi.forEach((t) => upsert(t, 'lifi'))
   BUILTIN.forEach((t) => upsert(t, 'uniswap'))
-  // Built-in names win over list names for the Circle tokens.
+  // The Circle tokens always use the app's own name, logo and price, so the same
+  // coin looks identical in the pill, the picker and the quick-pick row. USDC is
+  // pinned to exactly $1 (list prices drift to 1.001).
   for (const b of BUILTIN) {
     const t = map.get(b.address.toLowerCase())
-    if (t) { t.name = b.name; t.symbol = b.symbol }
+    if (!t) continue
+    t.name = b.name; t.symbol = b.symbol; t.logoURI = b.logoURI; t.logoAlt = undefined
+    if (b.priceUSD !== undefined) t.priceUSD = b.priceUSD
   }
   return [...map.values()].sort((a, b) => {
     const pa = PRIORITY.indexOf(a.symbol), pb = PRIORITY.indexOf(b.symbol)

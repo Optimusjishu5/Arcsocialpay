@@ -71,6 +71,8 @@ interface SendPrefill {
   amount?: string
   note?: string
   scheduleId?: string
+  /** Which Pay tool led here, so the history can label the payment. */
+  origin?: 'request' | 'split' | 'schedule'
   nonce: number
 }
 
@@ -79,12 +81,14 @@ interface Props {
   initialRecipient?: string
   initialAmount?: string
   initialNote?: string
+  /** 'split' when the link came from a split bill; other links are payment requests. */
+  initialVia?: 'split'
   /** Expiry of the payment link that opened this page (ms epoch). */
   initialExpiresAt?: number
   onNavigate: (view: NavView, extra?: Record<string, string>) => void
 }
 
-export function PayView({ initialMode = 'send', initialRecipient, initialAmount, initialNote, initialExpiresAt, onNavigate }: Props) {
+export function PayView({ initialMode = 'send', initialRecipient, initialAmount, initialNote, initialVia, initialExpiresAt, onNavigate }: Props) {
   const [mode, setMode] = useState<PayMode>(initialMode)
   const [openedAt] = useState(() => Date.now())
   const linkExpired = initialExpiresAt !== undefined && initialExpiresAt <= openedAt
@@ -93,6 +97,7 @@ export function PayView({ initialMode = 'send', initialRecipient, initialAmount,
     // An expired request must not pre-fill its amount or note.
     amount: linkExpired ? undefined : initialAmount,
     note: linkExpired ? undefined : initialNote,
+    origin: initialRecipient ? (initialVia ?? 'request') : undefined,
     nonce: 0,
   })
   const { address, isConnected, isArcChain, switchToArc, isSwitching } = useArcAccount()
@@ -188,6 +193,7 @@ export function PayView({ initialMode = 'send', initialRecipient, initialAmount,
               initialRecipient={prefill.recipient}
               initialAmount={prefill.amount}
               initialNote={prefill.note}
+              origin={prefill.origin}
               onSent={() => {
                 if (!prefill.scheduleId) return
                 scheduled.markPaid(prefill.scheduleId)
@@ -208,7 +214,7 @@ export function PayView({ initialMode = 'send', initialRecipient, initialAmount,
               <ScheduleForm
                 address={address!}
                 onPayNow={(s) => {
-                  setPrefill((p) => ({ recipient: s.recipient, amount: s.amount, note: s.note, scheduleId: s.id, nonce: p.nonce + 1 }))
+                  setPrefill((p) => ({ recipient: s.recipient, amount: s.amount, note: s.note, scheduleId: s.id, origin: 'schedule', nonce: p.nonce + 1 }))
                   setMode('send')
                 }}
               />
@@ -227,7 +233,7 @@ export function PayView({ initialMode = 'send', initialRecipient, initialAmount,
 // ── Send Form ──────────────────────────────────────────────────────────────
 
 function SendForm({
-  balance, balanceDisplay, onSuccess, myAddress, initialRecipient, initialAmount, initialNote, onSent,
+  balance, balanceDisplay, onSuccess, myAddress, initialRecipient, initialAmount, initialNote, origin, onSent,
 }: {
   balance: bigint
   balanceDisplay: string
@@ -236,6 +242,7 @@ function SendForm({
   initialRecipient?: string
   initialAmount?: string
   initialNote?: string
+  origin?: 'request' | 'split' | 'schedule'
   onSent?: () => void
 }) {
   const [recipient, setRecipient] = useState(() =>
@@ -295,6 +302,8 @@ function SendForm({
           status: 'pending',
           timestamp: Date.now(),
           note: snap.note,
+          // Paid from a request link, a split-bill link or a scheduled reminder: label it so.
+          kind: origin && initialRecipient && snap.recipient.trim().toLowerCase() === initialRecipient.toLowerCase() ? origin : undefined,
         })
       } catch {
         // store is best-effort; onchain state is source of truth

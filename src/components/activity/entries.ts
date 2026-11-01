@@ -1,23 +1,38 @@
 import { AtSign, DollarSign, FileText, Heart, MessageCircle, Repeat2, UserPlus, type LucideIcon } from 'lucide-react'
 import type { Comment, Notification, NotifType, Post, TxRecord } from '../../types/index'
 import type { Tone } from '../dashboard/ui'
-import { describeTx, txUrl } from '../../utils/txPresentation'
+import { describeTx, txUrl, TX_CATEGORY_META, type TxCategory } from '../../utils/txPresentation'
 import { formatAddress, isSameAddress } from '../../utils/format'
 
 export type EntryKind = 'payment' | 'swap' | 'bridge' | 'social'
-export type Filter = 'all' | 'payments' | 'swaps' | 'bridges' | 'social'
+/** What an entry is, in the user's words: Send, Receive, Swap, Bridge, Batch, Request, Split, Schedule or Social. */
+export type EntryCategory = TxCategory | 'social'
+export type Filter = 'all' | EntryCategory
 
-export const FILTERS: { id: Filter; label: string; kind?: EntryKind }[] = [
+export const CATEGORY_META: Record<EntryCategory, { label: string; icon: LucideIcon; tone: Tone }> = {
+  ...TX_CATEGORY_META,
+  social: { label: 'Social', icon: MessageCircle, tone: 'violet' },
+}
+
+/** Filter chips, in display order. */
+export const FILTERS: { id: Filter; label: string; category?: EntryCategory }[] = [
   { id: 'all', label: 'All' },
-  { id: 'payments', label: 'Payments', kind: 'payment' },
-  { id: 'swaps', label: 'Swaps', kind: 'swap' },
-  { id: 'bridges', label: 'Bridges', kind: 'bridge' },
-  { id: 'social', label: 'Social', kind: 'social' },
+  ...(['send', 'receive', 'swap', 'bridge', 'batch', 'request', 'schedule', 'split', 'other', 'social'] as const)
+    .map((c) => ({ id: c as Filter, label: CATEGORY_META[c].label, category: c as EntryCategory })),
 ]
+
+/** How many entries each filter would show. */
+export function countByFilter(entries: Entry[]): Record<Filter, number> {
+  const c = Object.fromEntries(FILTERS.map((f) => [f.id, 0])) as Record<Filter, number>
+  c.all = entries.length
+  for (const e of entries) c[e.category]++
+  return c
+}
 
 export interface Entry {
   id: string
   kind: EntryKind
+  category: EntryCategory
   at: number
   icon: LucideIcon
   tone: Tone
@@ -85,7 +100,7 @@ export function buildEntries({ address, txHistory, posts, comments, notification
     seen.add(key)
     const v = describeTx(t, address)
     list.push({
-      id: `tx-${key}`, kind: v.kind, at: t.timestamp, icon: v.icon, tone: v.tone,
+      id: `tx-${key}`, kind: v.kind, category: v.category, at: t.timestamp, icon: v.icon, tone: v.tone,
       title: v.title, detail: v.detail,
       amount: v.amountText ? { text: v.amountText, sign: v.sign === '-' ? '-' : '+' } : undefined,
       tx: t, url: txUrl(t),
@@ -94,22 +109,22 @@ export function buildEntries({ address, txHistory, posts, comments, notification
   for (const p of posts) {
     if (isSameAddress(p.authorAddress, address)) {
       list.push({
-        id: `post-${p.id}`, kind: 'social', at: p.createdAt, icon: FileText, tone: 'violet',
+        id: `post-${p.id}`, kind: 'social', category: 'social', at: p.createdAt, icon: FileText, tone: 'violet',
         title: p.repostOf ? 'You reposted' : 'You posted', detail: preview(p.content),
       })
     } else if (p.likes.some((a) => isSameAddress(a, address))) {
-      list.push({ id: `like-${p.id}`, kind: 'social', at: p.createdAt, icon: Heart, tone: 'rose', title: 'You liked a post', detail: preview(p.content) })
+      list.push({ id: `like-${p.id}`, kind: 'social', category: 'social', at: p.createdAt, icon: Heart, tone: 'rose', title: 'You liked a post', detail: preview(p.content) })
     }
   }
   for (const c of comments) {
     if (!isSameAddress(c.authorAddress, address)) continue
-    list.push({ id: `comment-${c.id}`, kind: 'social', at: c.createdAt, icon: MessageCircle, tone: 'blue', title: 'You commented', detail: preview(c.content) })
+    list.push({ id: `comment-${c.id}`, kind: 'social', category: 'social', at: c.createdAt, icon: MessageCircle, tone: 'blue', title: 'You commented', detail: preview(c.content) })
   }
   for (const n of notifications) {
     // Payment notifications duplicate the onchain record above.
     if (n.type === 'payment') continue
     list.push({
-      id: `notif-${n.id}`, kind: 'social', at: n.createdAt, icon: NOTIF_ICON[n.type], tone: NOTIF_TONE[n.type],
+      id: `notif-${n.id}`, kind: 'social', category: 'social', at: n.createdAt, icon: NOTIF_ICON[n.type], tone: NOTIF_TONE[n.type],
       title: `${formatAddress(n.fromAddress)} ${NOTIF_TEXT[n.type]}`, detail: n.content ? preview(n.content) : undefined,
     })
   }
@@ -159,7 +174,7 @@ export function toCsv(entries: Entry[]): string {
     const t = e.tx
     if (!t) continue
     rows.push([
-      new Date(t.timestamp).toISOString(), t.kind ?? 'payment', t.direction, t.amount, t.symbol ?? 'USDC',
+      new Date(t.timestamp).toISOString(), e.category, t.direction, t.amount, t.symbol ?? 'USDC',
       t.fromAddress, t.toAddress, t.status, t.note ?? t.summary ?? '', t.blockNumber !== undefined ? String(t.blockNumber) : '', t.txHash,
     ])
   }

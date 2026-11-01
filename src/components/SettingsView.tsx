@@ -5,6 +5,7 @@ import { useDisconnect } from 'wagmi'
 import { ConnectKitButton } from 'connectkit'
 import { ExternalLink, Moon, ShieldCheck, Sun, Trash2 } from 'lucide-react'
 import { Button } from './ui/Button'
+import { ContractCard } from './settings/ContractCard'
 import { ARC_CHAIN_ID, useArcAccount } from '../hooks/useArcWallet'
 import { ARC_EXPLORER_URL, ARC_RPC_URL } from '../chains'
 import { NOTIF_RULES, useSettings } from '../hooks/useSettings'
@@ -63,6 +64,8 @@ export function SettingsView() {
   return (
     <div className="max-w-xl mx-auto px-4 pt-4 pb-8 space-y-4">
       <h2 className="display font-bold text-lg" style={{ color: 'var(--ink)', letterSpacing: '-0.02em' }}>Settings</h2>
+
+      <ContractCard />
 
       <Section title="Network">
         <Row label="Network">Arc Mainnet</Row>

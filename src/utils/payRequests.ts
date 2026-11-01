@@ -8,7 +8,7 @@ import { isValidUsdcAmount } from './format'
 export const MAX_MEMO_LENGTH = 100
 
 /** App-relative path for a payment request: /?pay=0x..&amount=5&memo=Lunch */
-export function buildRequestPath(to: string, amount?: string, memo?: string, expiresAt?: number): string {
+export function buildRequestPath(to: string, amount?: string, memo?: string, expiresAt?: number, via?: 'split'): string {
   const params = new URLSearchParams({ pay: to })
   const a = (amount ?? '').trim()
   if (a && isValidUsdcAmount(a)) params.set('amount', a)
@@ -16,6 +16,8 @@ export function buildRequestPath(to: string, amount?: string, memo?: string, exp
   if (m) params.set('memo', m)
   // Expiry is a courtesy shown to the payer (unix seconds); it is not enforced onchain.
   if (expiresAt && Number.isFinite(expiresAt)) params.set('exp', String(Math.floor(expiresAt / 1000)))
+  // Marks a split-bill link so the payer's history can say "Split payment".
+  if (via === 'split') params.set('via', 'split')
   return `/?${params.toString()}`
 }
 
@@ -35,6 +37,8 @@ export interface PayPrefill {
   memo?: string
   /** Expiry time in ms epoch, when the link carries one. */
   expiresAt?: number
+  /** 'split' for split-bill links; any other link is a plain payment request. */
+  via?: 'split'
 }
 
 /** Read and validate prefill values from a query string. */
@@ -49,6 +53,7 @@ export function parsePayPrefill(search: string): PayPrefill {
     amount: amount && isValidUsdcAmount(amount) ? amount : undefined,
     memo: memo || undefined,
     expiresAt: Number.isSafeInteger(expSecs) && expSecs > 0 ? expSecs * 1000 : undefined,
+    via: params.get('via') === 'split' ? 'split' : undefined,
   }
 }
 

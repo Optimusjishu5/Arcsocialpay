@@ -67,7 +67,7 @@ export async function POST(req: Request) {
       timestamp: body.timestamp ?? Date.now(),
       note: body.note,
       blockNumber: body.blockNumber,
-      kind: ['payment', 'swap', 'bridge'].includes(body.kind ?? '') ? body.kind : undefined,
+      kind: ['payment', 'swap', 'bridge', 'batch', 'request', 'split', 'schedule', 'other'].includes(body.kind ?? '') ? body.kind : undefined,
       summary: typeof body.summary === 'string' ? body.summary.slice(0, 200) : undefined,
       symbol: typeof body.symbol === 'string' ? body.symbol.slice(0, 12) : undefined,
     })

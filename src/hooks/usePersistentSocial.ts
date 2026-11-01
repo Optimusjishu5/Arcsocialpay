@@ -176,7 +176,8 @@ export function usePersistentSocial(address: string | undefined) {
     async function send(url: string, body: unknown): Promise<boolean> {
       try {
         const res = await fetch(url, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) })
-        if (res.status === 503) { serverOff.current = true; return false }
+        // 503: no database set up. 404: a static host with no server routes. Either way, stay local-only.
+        if (res.status === 503 || res.status === 404) { serverOff.current = true; return false }
         return res.ok
       } catch {
         return false

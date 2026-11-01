@@ -14,6 +14,7 @@ import { appStore } from '../store/appStore'
 import { BLOCKS_PER_DAY, FAST_RPC_URL, markFastClient, scanRange } from '../lib/onchainActivity'
 import { appendCachedRecords, getCachedRecords, isPersistent, loadWallet, saveScanState, type CachedRecord, type ScanState } from '../lib/activityCache'
 import { UNI_TOKENS } from '../lib/uniswapArc'
+import { makeFetcher, streamExplorerHistory } from '../lib/explorerHistory'
 import { isSocialPayConfigured, SOCIAL_PAY_ADDRESS } from '../contracts/arcSocialPay'
 
 /** Each step of the scan covers this many days. */
@@ -43,11 +44,13 @@ export interface Status {
   ready: boolean
   /** When the last scan step finished. */
   lastSyncedAt: number
+  /** Where the history comes from: the Arc explorer's index (complete) or the nodes directly (slow, partial). */
+  source: 'checking' | 'explorer' | 'nodes'
 }
 
 const INITIAL: Status = {
   scanning: false, progress: 0, daysCovered: 0, coverage: 0, complete: false, paused: false,
-  incomplete: false, saved: true, ready: false, lastSyncedAt: 0,
+  incomplete: false, saved: true, ready: false, lastSyncedAt: 0, source: 'checking',
 }
 
 // One scan runs for the whole app (mounted in App); pages read its progress from here.
@@ -91,6 +94,54 @@ export function useOnchainActivity(address: string | undefined): void {
     let saved: ScanState | null = null
     let retryTimer: ReturnType<typeof setTimeout> | undefined
     let forwarding: Promise<boolean> | null = null
+    const fetchPage = makeFetcher()
+    let explorerOk = false
+    let explorerBusy = false
+    let explorerNewest = 0
+
+    /**
+     * Reads the wallet's history from the Arc explorer's index. A first run reads everything;
+     * later runs only the newest part. Returns true when the explorer could be used.
+     */
+    async function explorerSync(full: boolean): Promise<boolean> {
+      if (explorerBusy || ctx.cancelled) return explorerOk
+      explorerBusy = true
+      try {
+        const startHead = Number(await latestHead().catch(() => 0n))
+        if (full) setStatus({ scanning: true, progress: 0, incomplete: false })
+        const res = await streamExplorerHistory(me, {
+          fetchPage,
+          isCancelled: () => ctx.cancelled,
+          maxPages: full ? 800 : 40,
+          stopAtBlock: full ? undefined : Math.max(0, (explorerNewest || saved?.highest || startHead) - 3_000),
+          onRecords: (batch) => {
+            if (ctx.cancelled) return
+            appStore.syncChainRecords(batch)
+            appendCachedRecords(me, batch)
+          },
+          onProgress: ({ oldestBlock }) => {
+            if (!full || ctx.cancelled || !startHead || !oldestBlock) return
+            setStatus({ progress: Math.min(1, Math.max(0, 1 - oldestBlock / startHead)), daysCovered: Math.round((startHead - oldestBlock) / BLOCKS_PER_DAY) })
+          },
+        })
+        if (ctx.cancelled) return explorerOk
+        explorerOk = true
+        explorerNewest = Math.max(explorerNewest, res.newestBlock)
+        if (full && res.complete && startHead > 0) {
+          // The explorer holds the whole history, so there is nothing older for the nodes to read.
+          await remember({ lowest: 0, highest: Math.max(startHead, saved?.highest ?? 0) })
+          setStatus({ scanning: false, incomplete: false, progress: 1, complete: true, coverage: 1, source: 'explorer', lastSyncedAt: Date.now() })
+        } else {
+          setStatus({ source: 'explorer', lastSyncedAt: Date.now(), ...(full ? { scanning: false, incomplete: !res.complete } : {}) })
+        }
+        return true
+      } catch {
+        if (full && !ctx.cancelled) setStatus({ scanning: false })
+        return false
+      } finally {
+        explorerBusy = false
+      }
+    }
 
     const reportCoverage = () => {
       if (!saved) { setStatus({ daysCovered: 0, coverage: 0, complete: false }); return }
@@ -214,6 +265,7 @@ export function useOnchainActivity(address: string | undefined): void {
 
     setStatus({ ...INITIAL, paused: false })
     let iv: ReturnType<typeof setInterval> | undefined
+    let xv: ReturnType<typeof setInterval> | undefined
     const wake = () => { if (document.visibilityState === 'visible') void syncForward() }
     void (async () => {
       // Show what earlier visits already found before the first network call.
@@ -224,9 +276,17 @@ export function useOnchainActivity(address: string | undefined): void {
       appStore.syncChainRecords(getCachedRecords(me).slice(0, 200))
       setStatus({ ready: true, saved: persistent })
       reportCoverage()
-      void backfill()
+      // The explorer has the complete history, so ask it first. If it can't be reached, fall back to
+      // reading the nodes directly, which is slower and goes back only as far as it gets.
+      void (async () => {
+        const ok = await explorerSync(!(saved && saved.lowest <= 0))
+        if (ctx.cancelled) return
+        if (!ok) { setStatus({ source: 'nodes' }); void backfill() }
+      })()
       // Live: look for new blocks every couple of seconds (one cheap call when nothing changed).
       iv = setInterval(() => { void syncForward() }, LIVE_MS)
+      // Every so often the explorer adds anything the nodes scan can't describe (other tokens, approvals).
+      xv = setInterval(() => { if (explorerOk && document.visibilityState === 'visible') void explorerSync(false) }, 20_000)
       document.addEventListener('visibilitychange', wake)
       window.addEventListener('online', wake)
     })()
@@ -234,6 +294,7 @@ export function useOnchainActivity(address: string | undefined): void {
     return () => {
       ctx.cancelled = true
       clearInterval(iv)
+      clearInterval(xv)
       clearTimeout(retryTimer)
       document.removeEventListener('visibilitychange', wake)
       window.removeEventListener('online', wake)

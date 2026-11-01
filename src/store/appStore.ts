@@ -1077,14 +1077,15 @@ export const appStore = {
         const prev = list[i]
         const next: TxRecord = {
           ...prev,
-          status: 'confirmed',
           timestamp: r.timestamp,
           blockNumber: r.blockNumber ?? prev.blockNumber,
           amount: r.amount,
           symbol: r.symbol ?? prev.symbol,
-          kind: prev.kind ?? r.kind,
+          // The explorer sees every token, so its swap/bridge/other verdict beats a plain "payment" guess.
+          kind: (!prev.kind || prev.kind === 'payment') && (r.kind === 'swap' || r.kind === 'bridge' || r.kind === 'other') ? r.kind : prev.kind ?? r.kind,
           note: prev.note ?? r.note,
           summary: prev.summary ?? r.summary,
+          status: r.status === 'failed' ? 'failed' : 'confirmed',
         }
         const same =
           next.status === prev.status && next.timestamp === prev.timestamp && next.blockNumber === prev.blockNumber &&

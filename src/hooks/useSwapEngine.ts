@@ -11,7 +11,8 @@ import {
 } from '../lib/arcTokens'
 import { SWAP_PROVIDERS, validateSwapQuote, type SwapProviderId, type SwapQuote } from '../lib/swapProviders'
 
-const STALE_MS = 25_000
+const STALE_MS = 45_000
+const AUTO_REFRESH_MS = 15_000
 const LIFI_MIN_GAP_MS = 6_000
 const LIFI_COOLDOWN_MS = 90_000
 const LIFI_SESSION_BUDGET = 50
@@ -46,7 +47,6 @@ export function useSwapEngine({ routes, tokenFilter }: SwapEngineOptions) {
   const [slippage, setSlippage] = useState<number>(50)
   const [results, setResults] = useState<RouteResult[] | null>(null)
   const [resultsKey, setResultsKey] = useState('')
-  const [fetchedAt, setFetchedAt] = useState(0)
   const [choice, setChoice] = useState<'auto' | SwapProviderId>('auto')
   const [quoting, setQuoting] = useState(false)
   const [busy, setBusy] = useState<'approve' | 'swap' | null>(null)
@@ -76,11 +76,19 @@ export function useSwapEngine({ routes, tokenFilter }: SwapEngineOptions) {
     return () => { cancelled = true }
   }, [address, client, allTokens, doneHash])
 
-  const fetchQuotes = useCallback(async () => {
+  /**
+   * Asks every route for a price. Each route's answer shows up the moment it
+   * arrives, so a fast route is usable while a slower one is still loading.
+   * A silent refresh re-asks everything except LI.FI (small free limit) and
+   * swaps the new prices in without clearing the screen.
+   */
+  const fetchQuotes = useCallback(async (silent = false) => {
     if (!client || !address || amountIn === null) return
     const id = ++requestId.current
     const current = () => id === requestId.current
-    setQuoting(true); setError('')
+    const asked = silent ? routes.filter((r) => r !== 'lifi') : routes
+    if (asked.length === 0) return
+    if (!silent) { setQuoting(true); setError('') }
     const base = { client, user: address, tokenIn, tokenOut, amountIn, slippageBps: slippage }
     const ask = async (route: SwapProviderId): Promise<SwapQuote> => {
       if (route === 'lifi') {
@@ -101,22 +109,35 @@ export function useSwapEngine({ routes, tokenFilter }: SwapEngineOptions) {
         throw e
       }
     }
-    const settled = await Promise.allSettled(routes.map(ask))
-    if (!current()) return
-    const list: RouteResult[] = settled.map((s, i) =>
-      s.status === 'fulfilled' ? { id: routes[i], quote: s.value } : { id: routes[i], error: kitErrorMessage(s.reason) },
-    )
-    setResults(list); setResultsKey(key); setFetchedAt(Date.now()); setQuoting(false)
+    const answered: RouteResult[] = []
+    await Promise.all(asked.map(async (route) => {
+      let result: RouteResult
+      try { result = { id: route, quote: await ask(route) } } catch (e) { result = { id: route, error: kitErrorMessage(e) } }
+      if (!current()) return
+      answered.push(result)
+      // Silent refreshes wait for every route so the numbers do not jump around.
+      if (silent && answered.length < asked.length) return
+      setResults((prev) => (silent ? [...answered, ...(prev ?? []).filter((r) => !asked.includes(r.id))] : [...answered]))
+      setResultsKey(key)
+    }))
+    if (current() && !silent) setQuoting(false)
   }, [client, address, amountIn, tokenIn, tokenOut, slippage, routes, key])
 
   // Prices refresh a moment after you stop typing.
   useEffect(() => {
     if (amountIn === null || !address) return
-    const timer = setTimeout(() => { void fetchQuotes() }, routes.includes('lifi') ? 900 : 500)
+    const timer = setTimeout(() => { void fetchQuotes() }, routes.includes('lifi') ? 900 : 250)
     return () => clearTimeout(timer)
   }, [amountIn, address, fetchQuotes, routes])
 
   const fresh = results !== null && resultsKey === key
+  // Keeps the price current while you read it, so the Swap button never goes stale.
+  useEffect(() => {
+    if (!fresh || quoting || busy !== null || amountIn === null) return
+    const timer = setInterval(() => { if (!document.hidden) void fetchQuotes(true) }, AUTO_REFRESH_MS)
+    return () => clearInterval(timer)
+  }, [fresh, quoting, busy, amountIn, fetchQuotes])
+
   const ranked = useMemo(
     () => (fresh && results ? results.filter((r) => r.quote).sort((a, b) => Number((b.quote?.amountOut ?? 0n) - (a.quote?.amountOut ?? 0n))) : []),
     [fresh, results],
@@ -156,7 +177,7 @@ export function useSwapEngine({ routes, tokenFilter }: SwapEngineOptions) {
     setError('')
     try {
       // A price older than a few seconds is replaced, and you confirm the new one.
-      if (Date.now() - fetchedAt > STALE_MS) {
+      if (Date.now() - quote.fetchedAt > STALE_MS) {
         await fetchQuotes()
         setError('The price was refreshed. Review it and confirm again.')
         return
@@ -211,7 +232,7 @@ export function useSwapEngine({ routes, tokenFilter }: SwapEngineOptions) {
     tokenIn, tokenOut, amount, slippage, amountIn, balIn, balOut,
     results, ranked, best, selected, selectedId, choice, setChoice, fresh, quoting, noRoute, busy, error, doneHash,
     insufficient, noGas, usdIn, usdOut,
-    pick, flip, changeAmount, changeSlippage, fillPercent, swap, refresh: fetchQuotes,
+    pick, flip, changeAmount, changeSlippage, fillPercent, swap, refresh: () => fetchQuotes(),
   }
 }
 

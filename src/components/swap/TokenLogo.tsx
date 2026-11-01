@@ -29,6 +29,7 @@ export function TokenLogo({ symbol, logoURI, address, size = 30 }: TokenLogoProp
   return (
     <LogoImg
       src={src}
+      alt={known?.logoAlt}
       size={size}
       fallback={
         <span

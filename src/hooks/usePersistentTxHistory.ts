@@ -17,6 +17,8 @@ async function safeJson(res: Response): Promise<Record<string, unknown>> {
   }
 }
 
+const TX_KINDS = ['payment', 'swap', 'bridge', 'batch', 'request', 'split', 'schedule', 'other']
+
 /** A string field from untrusted JSON, or empty when it is not a string. */
 const str = (v: unknown): string => (typeof v === 'string' ? v : '')
 
@@ -36,7 +38,7 @@ function toRecord(raw: unknown): TxRecord | null {
     timestamp: typeof r.timestamp === 'number' ? r.timestamp : Date.now(),
     note: typeof r.note === 'string' ? r.note : undefined,
     blockNumber: typeof r.blockNumber === 'number' ? r.blockNumber : undefined,
-    kind: r.kind === 'swap' || r.kind === 'bridge' || r.kind === 'payment' ? r.kind : undefined,
+    kind: typeof r.kind === 'string' && TX_KINDS.includes(r.kind) ? (r.kind as TxRecord['kind']) : undefined,
     summary: typeof r.summary === 'string' ? r.summary : undefined,
     symbol: typeof r.symbol === 'string' ? r.symbol : undefined,
   }

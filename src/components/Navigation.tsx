@@ -1,6 +1,7 @@
-import { motion } from 'framer-motion'
+import { useEffect, useState } from 'react'
+import { AnimatePresence, motion } from 'framer-motion'
 import {
-  LayoutDashboard, MessageSquare, DollarSign, Compass, Bell, User, Moon, Sun, Activity, Settings, ArrowLeftRight, Waypoints,
+  LayoutDashboard, MessageSquare, DollarSign, Compass, Bell, User, Moon, Sun, Activity, Settings, ArrowLeftRight, Waypoints, Ellipsis,
 } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 import { ConnectKitButton } from 'connectkit'
@@ -33,7 +34,6 @@ const NAV_ITEMS: { id: NavView; label: string; icon: LucideIcon; tone: Tone }[] 
 // ── Desktop Sidebar ────────────────────────────────────────────────────────
 
 export function DesktopNav({ current, onNavigate }: Props) {
-  const { address, isConnected } = useArcAccount()
   const { theme, setTheme } = useTheme()
   const { notifications } = useAppStore()
   const { filterNotifications } = useSettings()
@@ -102,69 +102,112 @@ export function DesktopNav({ current, onNavigate }: Props) {
           {theme === 'dark' ? <Sun size={18} /> : <Moon size={18} />}
           <span className="text-sm font-medium">{theme === 'dark' ? 'Light mode' : 'Dark mode'}</span>
         </button>
-
-        {/* Wallet */}
-        {isConnected && address ? (
-          <div className="flex items-center gap-2 p-2 rounded-xl"
-            style={{ background: 'var(--surface-muted)', border: '1px solid var(--border)' }}>
-            <Avatar address={address} size={32} />
-            <div className="flex-1 min-w-0">
-              <div className="text-xs font-medium truncate" style={{ color: 'var(--ink)' }}>
-                Connected
-              </div>
-            </div>
-            <ConnectKitButton.Custom>
-              {({ show }) => (
-                <button onClick={show} className="text-xs font-medium px-2 py-1 rounded-lg transition-colors hover:bg-[var(--surface-strong)]"
-                  style={{ color: 'var(--muted)' }}>
-                  ···
-                </button>
-              )}
-            </ConnectKitButton.Custom>
-          </div>
-        ) : (
-          <ConnectKitButton />
-        )}
       </div>
     </nav>
   )
 }
 
+// ── Desktop Top Bar ────────────────────────────────────────────────────────
+
+/** Desktop header with the single wallet button at the top right. */
+export function DesktopTopBar() {
+  return (
+    <div className="hidden md:flex items-center justify-end px-6 py-3 sticky top-0 z-40"
+      style={{ background: 'var(--surface)', borderBottom: '1px solid var(--border)', backdropFilter: 'blur(12px)' }}>
+      <ConnectKitButton />
+    </div>
+  )
+}
+
 // ── Mobile Bottom Tab Bar ──────────────────────────────────────────────────
+
+// Five tabs stay in the bar; Messages, Explore and the rest open from "More".
+const MOBILE_TABS: NavView[] = ['home', 'pay', 'swap', 'bridge', 'activity']
+const MORE_ITEMS: NavView[] = ['messages', 'explore', 'notifications', 'profile', 'settings']
 
 export function MobileNav({ current, onNavigate }: Props) {
   const { theme } = useTheme()
-  // Seven tabs on mobile; the bar scrolls sideways on narrow screens. Alerts, Settings and Profile live in the top bar.
-  const mobileItems = NAV_ITEMS.filter((n) => ['home', 'messages', 'pay', 'swap', 'bridge', 'explore', 'activity'].includes(n.id))
+  const [moreOpen, setMoreOpen] = useState(false)
+  const tabs = MOBILE_TABS.map((id) => NAV_ITEMS.find((n) => n.id === id)).filter((n): n is (typeof NAV_ITEMS)[number] => !!n)
+  const moreItems = MORE_ITEMS.map((id) => NAV_ITEMS.find((n) => n.id === id)).filter((n): n is (typeof NAV_ITEMS)[number] => !!n)
+  const moreActive = moreOpen || MORE_ITEMS.includes(current)
+
+  useEffect(() => {
+    if (!moreOpen) return
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setMoreOpen(false) }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [moreOpen])
+
+  const go = (id: NavView) => { setMoreOpen(false); onNavigate(id) }
+  const tabClass = 'flex flex-col items-center gap-0.5 flex-1 min-w-0 py-1 rounded-xl transition-colors relative focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus)]'
 
   return (
-    <nav className="md:hidden fixed bottom-0 left-0 right-0 z-40 safe-bottom"
-      style={{
-        background: 'var(--surface)',
-        borderTop: '1px solid var(--border)',
-        backdropFilter: 'blur(16px)',
-      }}>
-      <div className="flex items-center px-2 pt-2 pb-1 overflow-x-auto" style={{ scrollbarWidth: 'none' }}>
-        {mobileItems.map(({ id, label, icon: Icon, tone }) => {
-          const isActive = current === id
+    <>
+      <AnimatePresence>
+        {moreOpen && (
+          <motion.div
+            key="more-sheet"
+            className="md:hidden fixed inset-0 z-50 flex items-end"
+            initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+          >
+            <button type="button" aria-label="Close menu" onClick={() => setMoreOpen(false)} className="absolute inset-0" style={{ background: 'rgba(8,20,40,0.45)' }} />
+            <motion.div
+              role="dialog" aria-label="More"
+              initial={{ y: 48, opacity: 0 }} animate={{ y: 0, opacity: 1 }} exit={{ y: 48, opacity: 0 }}
+              transition={{ type: 'spring', damping: 28, stiffness: 320 }}
+              className="relative w-full rounded-t-[28px] px-4 pt-3 safe-bottom"
+              style={{ background: 'var(--surface-strong)', borderTop: '1px solid var(--border)', paddingBottom: 'calc(env(safe-area-inset-bottom, 0px) + 16px)' }}
+            >
+              <div className="mx-auto mb-3 h-1 w-10 rounded-full" style={{ background: 'var(--border-strong)' }} />
+              <p className="text-xs font-semibold uppercase tracking-wider px-1 mb-2" style={{ color: 'var(--subtle)' }}>More</p>
+              <div className="grid grid-cols-3 gap-2">
+                {moreItems.map(({ id, label, icon, tone }) => (
+                  <button
+                    key={id}
+                    onClick={() => go(id)}
+                    className="flex flex-col items-center gap-1.5 py-3 rounded-2xl transition-transform active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus)]"
+                    style={{ background: current === id ? 'var(--surface-muted)' : 'var(--surface)', border: '1px solid var(--border)', color: current === id ? 'var(--accent)' : 'var(--ink)' }}
+                  >
+                    <GradientIcon icon={icon} tone={tone} size={36} />
+                    <span className="text-xs font-semibold">{label}</span>
+                  </button>
+                ))}
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
-          return (
-            <button
-              key={id}
-              onClick={() => onNavigate(id)}
-              className="flex flex-col items-center gap-0.5 flex-1 py-1 rounded-xl transition-colors relative min-w-[64px]"
-              style={{ color: isActive ? 'var(--accent)' : 'var(--muted)' }}>
-              <div className="relative">
+      <nav className="md:hidden fixed bottom-0 left-0 right-0 z-40 safe-bottom"
+        style={{
+          background: 'var(--surface)',
+          borderTop: '1px solid var(--border)',
+          backdropFilter: 'blur(16px)',
+        }}>
+        <div className="flex items-center px-2 pt-2 pb-1">
+          {tabs.map(({ id, label, icon: Icon, tone }) => {
+            const isActive = current === id && !moreOpen
+            return (
+              <button key={id} onClick={() => go(id)} aria-current={isActive ? 'page' : undefined} className={tabClass}
+                style={{ color: isActive ? 'var(--accent)' : 'var(--muted)' }}>
                 {isActive
                   ? <GradientIcon icon={Icon} tone={tone} size={32} />
                   : <span className="inline-flex items-center justify-center" style={{ width: 32, height: 32, color: TONES[tone][theme === 'dark' ? 0 : 1] }}><Icon size={22} /></span>}
-              </div>
-              <span className={`text-xs font-medium ${isActive ? 'font-semibold' : ''}`}>{label}</span>
-            </button>
-          )
-        })}
-      </div>
-    </nav>
+                <span className={`text-xs font-medium ${isActive ? 'font-semibold' : ''}`}>{label}</span>
+              </button>
+            )
+          })}
+          <button onClick={() => setMoreOpen((o) => !o)} aria-haspopup="dialog" aria-expanded={moreOpen} className={tabClass}
+            style={{ color: moreActive ? 'var(--accent)' : 'var(--muted)' }}>
+            {moreActive
+              ? <GradientIcon icon={Ellipsis} tone="indigo" size={32} />
+              : <span className="inline-flex items-center justify-center" style={{ width: 32, height: 32, color: TONES.indigo[theme === 'dark' ? 0 : 1] }}><Ellipsis size={22} /></span>}
+            <span className={`text-xs font-medium ${moreActive ? 'font-semibold' : ''}`}>More</span>
+          </button>
+        </div>
+      </nav>
+    </>
   )
 }
 

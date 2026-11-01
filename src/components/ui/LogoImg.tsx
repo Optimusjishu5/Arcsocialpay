@@ -7,6 +7,8 @@ export const proxiedLogo = (url: string) => (url.startsWith('/') ? url : `/api/l
 
 interface LogoImgProps {
   src?: string
+  /** Second logo tried when the first fails. */
+  alt?: string
   size: number
   /** Shown when there is no image or every source failed. */
   fallback: ReactNode
@@ -17,15 +19,19 @@ interface LogoImgProps {
  * shows the fallback. The image fades in once loaded and a soft placeholder
  * holds its place, so lists do not jump or flash while scrolling.
  */
-export function LogoImg({ src, size, fallback }: LogoImgProps) {
-  // Which source we are on: 0 = this app, 1 = original host, 2 = give up.
+export function LogoImg({ src, alt, size, fallback }: LogoImgProps) {
+  // Which source we are on: 0 = this app's copy, 1 = original host, 2 = second logo via this app, 3 = second logo direct, 4 = give up.
   const [st, setSt] = useState({ src, attempt: 0, loaded: false })
   // A new logo starts over from the first source.
   const cur = st.src === src ? st : { src, attempt: 0, loaded: false }
   const { attempt, loaded } = cur
 
-  if (!src || attempt > 1) return <>{fallback}</>
-  const url = attempt === 0 ? proxiedLogo(src) : src
+  const chain = [proxiedLogo(src ?? ''), src, alt ? proxiedLogo(alt) : undefined, alt]
+  // Skip steps that have no source (no second logo, or a local file whose copy is itself).
+  let step = attempt
+  while (step < chain.length && (!chain[step] || (step > 0 && chain[step] === chain[step - 1]))) step++
+  if (!src || step >= chain.length) return <>{fallback}</>
+  const url = chain[step] as string
   return (
     <span
       className="relative inline-block flex-shrink-0 rounded-full overflow-hidden"
@@ -41,7 +47,7 @@ export function LogoImg({ src, size, fallback }: LogoImgProps) {
         decoding="async"
         referrerPolicy="no-referrer"
         onLoad={() => setSt({ ...cur, loaded: true })}
-        onError={() => setSt({ src, attempt: attempt + 1, loaded: false })}
+        onError={() => setSt({ src, attempt: step + 1, loaded: false })}
         className="absolute inset-0 w-full h-full object-cover transition-opacity duration-200"
         style={{ opacity: loaded ? 1 : 0 }}
       />

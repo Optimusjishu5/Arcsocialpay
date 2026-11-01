@@ -9,7 +9,7 @@ import { copyText } from '../../utils/copy'
 import { formatAddress, formatFullTimestamp, formatTimestamp } from '../../utils/format'
 import type { Entry } from './entries'
 
-const KIND_LABEL = { payment: 'Payment', swap: 'Swap', bridge: 'Bridge', social: 'Social' } as const
+import { CATEGORY_META } from './entries'
 
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
@@ -90,9 +90,9 @@ export function ActivityRow({ entry: e }: { entry: Entry }) {
           style={{ background: 'var(--surface-muted)' }}
         >
           <Field label="Status"><TxStatusBadge status={t.status} /></Field>
-          <Field label="Type">{KIND_LABEL[e.kind]}</Field>
+          <Field label="Type">{CATEGORY_META[e.category].label}</Field>
           <Field label="Time">{formatFullTimestamp(t.timestamp)}</Field>
-          <Field label="Amount">{t.amount} {t.symbol ?? 'USDC'}</Field>
+          {t.kind !== 'other' && <Field label="Amount">{t.amount} {t.symbol ?? 'USDC'}</Field>}
           {t.kind !== 'swap' && t.kind !== 'bridge' && (
             <>
               <Field label="From"><CopyValue value={t.fromAddress} shown={formatAddress(t.fromAddress)} label="Address" /></Field>

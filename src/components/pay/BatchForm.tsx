@@ -113,7 +113,7 @@ export function BatchForm({ address }: { address: string }) {
         appStore.addTxRecord({
           txHash: hash, chainId: ARC_CHAIN_ID, direction: 'sent', amount: row.amount.trim(),
           fromAddress: address, toAddress: row.address.trim(), status: 'pending',
-          timestamp: Date.now(), note: 'Batch transfer',
+          timestamp: Date.now(), note: 'Batch transfer', kind: 'batch',
         })
         const receipt = await client.waitForTransactionReceipt({ hash })
         if (receipt.status !== 'success') throw new Error('reverted')
