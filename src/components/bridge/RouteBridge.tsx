@@ -14,6 +14,7 @@ import {
   getDeliveryStatus, getRouteQuotes, validateRouteTxs, type DeliveryStatus, type ProviderResult, type RouteQuote, type RouteRequest,
 } from '../../lib/routeProviders'
 import { fieldClass, fieldLabel, fieldStyle } from '../pay/ShareLinkBox'
+import { KitChainPicker } from './KitChainPicker'
 import { parseUsdc } from '@/onchain-money'
 import { Zap, Rocket, Layers } from 'lucide-react'
 import { GradientIcon, type Tone } from '../dashboard/ui'
@@ -185,9 +186,9 @@ export function RouteBridge() {
       </div>
 
       <div className="rounded-2xl p-4 space-y-4" data-tc="">
-        <Select label="From" value={from} chains={chains} onChange={(v) => { setFrom(v); resetResults() }} disabled={busy} />
+        <KitChainPicker label="From" value={from} chains={chains} onChange={(v) => { setFrom(v); resetResults() }} disabled={busy} />
         <div className="flex justify-center -my-1" style={{ color: 'var(--muted)' }}><ArrowDown size={18} /></div>
-        <Select label="To" value={to} chains={chains} onChange={(v) => { setTo(v); resetResults() }} disabled={busy} />
+        <KitChainPicker label="To" value={to} chains={chains} onChange={(v) => { setTo(v); resetResults() }} disabled={busy} />
         <div>
           <div className="flex items-center justify-between mb-1.5">
             <label className={fieldLabel.replace(' mb-1.5', '')} style={{ color: 'var(--muted)' }}>Amount</label>
@@ -300,20 +301,6 @@ function Line({ state, label, children }: { state: 'done' | 'wait' | 'bad'; labe
       </span>
       <span className="flex-1" style={{ color: 'var(--ink)' }}>{label}</span>
       {children}
-    </div>
-  )
-}
-
-function Select({ label, value, chains, onChange, disabled }: {
-  label: string; value: string; chains: EvmChainDef[]; onChange: (v: string) => void; disabled: boolean
-}) {
-  return (
-    <div>
-      <label className={fieldLabel} style={{ color: 'var(--muted)' }}>{label}</label>
-      <select value={value} onChange={(e) => onChange(e.target.value)} disabled={disabled} className={fieldClass} style={fieldStyle}>
-        {chains.length === 0 && <option value={value}>{value}</option>}
-        {chains.map((c) => <option key={c.chain} value={c.chain}>{c.name}</option>)}
-      </select>
     </div>
   )
 }

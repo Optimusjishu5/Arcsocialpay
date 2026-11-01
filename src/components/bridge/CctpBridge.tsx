@@ -14,6 +14,7 @@ import {
 } from '../../lib/circleKit'
 import { ARC_CHAIN_ID } from '../../chains'
 import { fieldClass, fieldLabel, fieldStyle } from '../pay/ShareLinkBox'
+import { KitChainPicker } from './KitChainPicker'
 import { parseUsdc } from '@/onchain-money'
 
 type Kit = AppKit
@@ -186,9 +187,9 @@ export function CctpBridge() {
       </div>
 
       <div className="rounded-2xl p-4 space-y-4" data-tc="">
-        <ChainSelect label="From" value={from} chains={chains} onChange={(v) => { setFrom(v); setQuote(null) }} disabled={busy !== null} />
+        <KitChainPicker label="From" value={from} chains={chains} onChange={(v) => { setFrom(v); setQuote(null) }} disabled={busy !== null} />
         <div className="flex justify-center -my-1" style={{ color: 'var(--muted)' }}><ArrowDown size={18} /></div>
-        <ChainSelect label="To" value={to} chains={chains} onChange={(v) => { setTo(v); setQuote(null) }} disabled={busy !== null} />
+        <KitChainPicker label="To" value={to} chains={chains} onChange={(v) => { setTo(v); setQuote(null) }} disabled={busy !== null} />
 
         <div>
           <div className="flex items-center justify-between mb-1.5">
@@ -278,21 +279,6 @@ export function CctpBridge() {
           )}
         </div>
       )}
-    </div>
-  )
-}
-
-function ChainSelect({ label, value, chains, onChange, disabled }: {
-  label: string; value: string; chains: EvmChainDef[]; onChange: (v: string) => void; disabled: boolean
-}) {
-  return (
-    <div>
-      <label className={fieldLabel} style={{ color: 'var(--muted)' }}>{label}</label>
-      <select value={value} onChange={(e) => onChange(e.target.value)} disabled={disabled}
-        className={fieldClass} style={fieldStyle}>
-        {chains.length === 0 && <option value={value}>{value}</option>}
-        {chains.map((c) => <option key={c.chain} value={c.chain}>{c.name}</option>)}
-      </select>
     </div>
   )
 }

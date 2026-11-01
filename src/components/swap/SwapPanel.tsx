@@ -3,12 +3,10 @@
 import { useId, useRef, useState, type ReactNode } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
 import { ArrowDown, ChevronDown } from 'lucide-react'
-import { TONES, type Tone } from '../dashboard/ui'
+import { TokenLogo } from './TokenLogo'
 
 // Shared pieces of the swap screens: big amount cards, token pills, a flip
 // button that spins, a slippage picker and an animated details panel.
-
-export const TOKEN_TONE: Record<string, Tone> = { USDC: 'blue', EURC: 'indigo', cirBTC: 'amber' }
 
 /**
  * Cleans what the user types into an amount box. Returns the accepted text, or
@@ -26,32 +24,35 @@ export function cleanAmountInput(raw: string, decimals: number): string | null {
   return v
 }
 
-function TokenBadge({ symbol, size = 30 }: { symbol: string; size?: number }) {
-  const [from, to] = TONES[TOKEN_TONE[symbol] ?? 'blue']
-  return (
-    <span
-      className="inline-flex items-center justify-center rounded-full font-bold text-white flex-shrink-0"
-      style={{
-        width: size,
-        height: size,
-        fontSize: Math.round(size * 0.42),
-        background: `linear-gradient(135deg, ${from}, ${to})`,
-        boxShadow: `0 6px 14px -6px ${to}, inset 0 1px 0 rgba(255,255,255,0.4)`,
-      }}
-    >
-      {symbol === 'cirBTC' ? 'B' : symbol.charAt(0)}
-    </span>
-  )
-}
-
-function TokenPill({ value, tokens, onChange }: { value: string; tokens: readonly string[]; onChange: (t: string) => void }) {
+function TokenPill({ value, tokens, onChange, token, onOpenPicker }: {
+  value: string
+  tokens: readonly string[]
+  onChange: (t: string) => void
+  token?: { symbol: string; logoURI?: string; address?: string }
+  onOpenPicker?: () => void
+}) {
+  const pillStyle = { background: 'var(--surface-strong)', border: '1px solid var(--border-strong)', color: 'var(--ink)' }
+  // Picker mode: opens the searchable token list with logos and balances.
+  if (onOpenPicker) {
+    return (
+      <button
+        type="button"
+        onClick={(e) => { e.stopPropagation(); onOpenPicker() }}
+        aria-label={`Choose token, ${value} selected`}
+        aria-haspopup="dialog"
+        className="flex items-center gap-2 h-12 pl-2 pr-3 rounded-full font-semibold text-base transition-transform active:scale-95 flex-shrink-0 max-w-[48%] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus)]"
+        style={pillStyle}
+      >
+        <TokenLogo symbol={value} logoURI={token?.logoURI} address={token?.address} />
+        <span className="truncate">{value}</span>
+        <ChevronDown size={16} className="flex-shrink-0" style={{ color: 'var(--muted)' }} />
+      </button>
+    )
+  }
   return (
     <div className="relative flex-shrink-0">
-      <div
-        className="flex items-center gap-2 h-12 pl-2 pr-9 rounded-full font-semibold text-base transition-transform active:scale-95"
-        style={{ background: 'var(--surface-strong)', border: '1px solid var(--border-strong)', color: 'var(--ink)' }}
-      >
-        <TokenBadge symbol={value} />
+      <div className="flex items-center gap-2 h-12 pl-2 pr-9 rounded-full font-semibold text-base transition-transform active:scale-95" style={pillStyle}>
+        <TokenLogo symbol={value} />
         {value}
       </div>
       <ChevronDown size={16} className="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none" style={{ color: 'var(--muted)' }} />
@@ -67,28 +68,34 @@ function TokenPill({ value, tokens, onChange }: { value: string; tokens: readonl
   )
 }
 
-const PCTS = [25, 50, 75, 100] as const
-
 interface AmountCardProps {
   label: string
   value: string
   symbol: string
   tokens: readonly string[]
   onToken: (t: string) => void
-  /** Present for the "You pay" card; omit for the read-only "You receive" card. */
+  /** Picker mode: shows this token's logo and opens the token list instead of a plain select. */
+  token?: { symbol: string; logoURI?: string; address?: string }
+  onOpenPicker?: () => void
+  /** Present for the "Sell" card; omit for the read-only "Receive" card. */
   onChange?: (v: string) => void
   decimals?: number
   balanceText?: string
   onPct?: (pct: number) => void
+  /** Quick-fill buttons, as percentages of the balance. 100 reads MAX. */
+  pcts?: readonly number[]
   /** Show a shimmer in place of the number while a price is loading. */
   loading?: boolean
   /** Fade the number (it belongs to an older price). */
   dim?: boolean
   invalid?: boolean
+  /** Small line under the number, such as its dollar value. */
+  subText?: string
 }
 
 export function AmountCard({
-  label, value, symbol, tokens, onToken, onChange, decimals = 6, balanceText, onPct, loading, dim, invalid,
+  label, value, symbol, tokens, onToken, token, onOpenPicker, onChange, decimals = 6, balanceText, onPct, pcts = [25, 50, 100],
+  loading, dim, invalid, subText,
 }: AmountCardProps) {
   const id = useId()
   const inputRef = useRef<HTMLInputElement>(null)
@@ -99,35 +106,34 @@ export function AmountCard({
   return (
     <div
       onClick={() => inputRef.current?.focus()}
-      className="rounded-3xl p-4 transition-all duration-200"
+      className="rounded-[28px] p-4 transition-all duration-200"
       style={{
         background: 'color-mix(in srgb, var(--tone-from, #5fbeff) 7%, var(--surface-muted))',
-        border: `1.5px solid ${invalid ? 'var(--danger)' : focused ? 'var(--tone-to)' : 'color-mix(in srgb, var(--tone-to, #2563eb) 22%, var(--border))'}`,
+        border: `1.5px solid ${invalid ? 'var(--danger)' : focused ? 'var(--tone-to)' : 'color-mix(in srgb, var(--tone-to, #2563eb) 14%, var(--border))'}`,
         boxShadow: focused ? '0 0 0 4px color-mix(in srgb, var(--tone-from, #5fbeff) 28%, transparent)' : 'none',
       }}
     >
-      <div className="flex items-center justify-between gap-2 mb-2 min-h-[24px]">
-        <label htmlFor={id} className="text-xs font-semibold uppercase tracking-wider">{label}</label>
-        {editable && balanceText && (
-          <div className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
-            <span className="text-xs tabnum mr-1" style={{ color: 'var(--muted)' }}>{balanceText}</span>
-            {onPct && PCTS.map((p) => (
-              <button
-                key={p}
-                type="button"
-                onClick={() => onPct(p)}
-                data-chip=""
-                className="h-6 px-2 rounded-full text-[11px]"
-              >
-                {p === 100 ? 'Max' : `${p}%`}
-              </button>
-            ))}
-          </div>
-        )}
+      <div className="flex items-center justify-between gap-2 mb-2 min-h-[28px]">
+        <label htmlFor={id} className="text-sm font-semibold" style={{ color: 'var(--ink-2)' }}>{label}</label>
+        <div className="flex items-center gap-1.5 min-w-0" onClick={(e) => e.stopPropagation()}>
+          {balanceText && <span className="text-sm tabnum mr-1 truncate" style={{ color: 'var(--muted)' }}>{balanceText}</span>}
+          {editable && onPct && pcts.map((p) => (
+            <button
+              key={p}
+              type="button"
+              onClick={() => onPct(p)}
+              data-chip=""
+              className="h-7 px-2.5 rounded-full text-[11px] font-semibold"
+            >
+              {p === 100 ? 'MAX' : `${p}%`}
+            </button>
+          ))}
+        </div>
       </div>
 
       <div className="flex items-center gap-3">
-        <div className="flex-1 min-w-0 h-14 flex items-center">
+        <TokenPill value={symbol} tokens={tokens} onChange={onToken} token={token} onOpenPicker={onOpenPicker} />
+        <div className="flex-1 min-w-0 h-14 flex flex-col items-end justify-center">
           {editable ? (
             <input
               id={id}
@@ -142,34 +148,34 @@ export function AmountCard({
               inputMode="decimal"
               autoComplete="off"
               spellCheck={false}
-              placeholder="0"
+              placeholder="0.00"
               aria-label={label}
-              className={`w-full bg-transparent outline-none font-semibold tabnum ${size}`}
+              className={`w-full bg-transparent outline-none font-semibold tabnum text-right placeholder:text-[var(--subtle)] ${size}`}
               style={{ color: 'var(--ink)', letterSpacing: '-0.02em' }}
             />
           ) : loading && !value ? (
-            <span className="block h-9 w-40 rounded-xl animate-pulse" style={{ background: 'color-mix(in srgb, var(--tone-from) 22%, var(--surface-strong))' }} />
+            <span className="block h-9 w-32 rounded-xl animate-pulse" style={{ background: 'color-mix(in srgb, var(--tone-from) 22%, var(--surface-strong))' }} />
           ) : (
             <output
               id={id}
-              className={`block w-full truncate font-semibold tabnum transition-opacity duration-200 ${size}`}
+              className={`block w-full truncate text-right font-semibold tabnum transition-opacity duration-200 ${size}`}
               style={{ color: value ? 'var(--ink)' : 'var(--subtle)', opacity: dim || loading ? 0.45 : 1, letterSpacing: '-0.02em' }}
             >
-              {value || '0'}
+              {value || '0.00'}
             </output>
           )}
+          {subText && <span className="text-[11px] tabnum" style={{ color: 'var(--muted)' }}>{subText}</span>}
         </div>
-        <TokenPill value={symbol} tokens={tokens} onChange={onToken} />
       </div>
     </div>
   )
 }
 
-/** Round button between the two cards. Spins half a turn every time it is pressed. */
+/** Small round button between the two cards. Turns half a turn every time it is pressed. */
 export function FlipButton({ onFlip }: { onFlip: () => void }) {
   const [turns, setTurns] = useState(0)
   return (
-    <div className="relative z-10 flex justify-center -my-5">
+    <div className="relative z-10 flex justify-center -my-4">
       <motion.button
         type="button"
         aria-label="Swap direction"
@@ -178,14 +184,15 @@ export function FlipButton({ onFlip }: { onFlip: () => void }) {
         transition={{ type: 'spring', stiffness: 260, damping: 18 }}
         whileHover={{ scale: 1.08 }}
         whileTap={{ scale: 0.9 }}
-        className="w-11 h-11 rounded-full flex items-center justify-center text-white"
+        className="w-10 h-10 rounded-full flex items-center justify-center focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus)]"
         style={{
-          background: 'linear-gradient(135deg, var(--tone-from), var(--tone-to))',
-          border: '4px solid var(--surface)',
-          boxShadow: '0 10px 22px -8px var(--tone-glow)',
+          background: 'color-mix(in srgb, var(--tone-from, #5fbeff) 22%, var(--surface-strong))',
+          color: 'var(--tone-to)',
+          border: '4px solid var(--surface-strong)',
+          boxShadow: '0 8px 18px -10px var(--tone-glow)',
         }}
       >
-        <ArrowDown size={18} strokeWidth={2.6} />
+        <ArrowDown size={16} strokeWidth={2.6} />
       </motion.button>
     </div>
   )
