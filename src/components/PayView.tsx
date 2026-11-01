@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { Send as SendIcon, Layers, HandCoins, Users, CalendarClock, ArrowLeftRight, Waypoints, ArrowDownLeft, Copy, Check, ExternalLink, QrCode, AlertCircle, X } from 'lucide-react'
+import { Send as SendIcon, Layers, HandCoins, Users, CalendarClock, ArrowDownLeft, Copy, Check, ExternalLink, QrCode, AlertCircle, X } from 'lucide-react'
 import { ConnectKitButton } from 'connectkit'
 import { isAddress } from 'viem'
 import { useWaitForTransactionReceipt } from 'wagmi'
@@ -47,6 +47,9 @@ function formatMaxWithReserve(balance: bigint): string {
 }
 
 export type PayMode = 'send' | 'batch' | 'request' | 'split' | 'schedule' | 'receive'
+
+/** The tools shown at the top of the page. Send is the page itself and Receive opens from the Home tab. */
+const TOOLS: readonly PayMode[] = ['batch', 'request', 'split', 'schedule']
 
 const MODE_LABELS: Record<PayMode, string> = {
   send: 'Send',
@@ -117,13 +120,13 @@ export function PayView({ initialMode = 'send', initialRecipient, initialAmount,
 
   return (
     <div className="tone-scope flex flex-col gap-4 px-4 pt-4 pb-8 max-w-lg mx-auto" style={toneVars(MODE_STYLE[mode].tone)}>
-      {/* Tab switcher */}
-      <div className="grid grid-cols-3 sm:grid-cols-6 gap-2">
-        {(Object.keys(MODE_LABELS) as PayMode[]).map((m) => {
+      {/* Tools. Send is the page itself; tap a tool to open it, tap it again to go back to Send. */}
+      <div className="grid grid-cols-4 gap-2" role="group" aria-label="Payment tools">
+        {TOOLS.map((m) => {
           const { icon, tone } = MODE_STYLE[m]
           const active = mode === m
           return (
-            <button key={m} onClick={() => setMode(m)} aria-pressed={active}
+            <button key={m} onClick={() => setMode(active ? 'send' : m)} aria-pressed={active}
               className="flex flex-col items-center gap-1.5 py-2.5 rounded-2xl transition-all active:scale-95 hover:-translate-y-0.5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus)]"
               style={{
                 background: active ? 'var(--surface-strong)' : 'var(--surface)',
@@ -137,18 +140,13 @@ export function PayView({ initialMode = 'send', initialRecipient, initialAmount,
         })}
       </div>
 
-      <div className="grid grid-cols-2 gap-2">
-        <button onClick={() => onNavigate('swap')}
-          className="h-14 rounded-2xl text-sm font-semibold flex items-center justify-center gap-3 transition-all active:scale-95 hover:-translate-y-0.5"
-          style={{ background: 'var(--surface)', border: '1px solid var(--border)', color: 'var(--ink)' }}>
-          <GradientIcon icon={ArrowLeftRight} tone="violet" size={34} /> Swap
+      {mode === 'receive' && (
+        <button onClick={() => setMode('send')}
+          className="self-start inline-flex items-center gap-1.5 h-9 px-3 rounded-full text-sm font-semibold"
+          style={{ background: 'var(--surface-strong)', border: '1px solid var(--border)', color: 'var(--ink)' }}>
+          <SendIcon size={14} /> Back to send
         </button>
-        <button onClick={() => onNavigate('bridge')}
-          className="h-14 rounded-2xl text-sm font-semibold flex items-center justify-center gap-3 transition-all active:scale-95 hover:-translate-y-0.5"
-          style={{ background: 'var(--surface)', border: '1px solid var(--border)', color: 'var(--ink)' }}>
-          <GradientIcon icon={Waypoints} tone="amber" size={34} /> Bridge
-        </button>
-      </div>
+      )}
 
       {initialExpiresAt !== undefined && mode === 'send' && (
         <div className="flex items-start gap-2 p-3 rounded-xl text-sm"
