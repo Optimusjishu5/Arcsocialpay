@@ -135,7 +135,7 @@ async function quoteRelay(r: RouteRequest): Promise<RouteQuote> {
 
 export async function quoteLifi(r: RouteRequest): Promise<RouteQuote> {
   const q = new URLSearchParams({
-    fromChain: String(r.fromChainId), toChain: String(r.toChainId), fromToken: r.fromToken, toToken: r.toToken,
+    fromChain: String(r.fromChainId), toChain: String(r.toChainId), fromToken: r.fromToken.toLowerCase(), toToken: r.toToken.toLowerCase(),
     fromAmount: r.amountRaw.toString(), fromAddress: r.user, toAddress: r.recipient, slippage: '0.005',
   })
   const d = await getJson<{

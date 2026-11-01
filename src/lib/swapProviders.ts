@@ -134,7 +134,7 @@ interface LifiQuote {
 
 async function quoteLifi(r: SwapQuoteRequest): Promise<SwapQuote> {
   const qs = new URLSearchParams({
-    fromChain: String(ARC_CHAIN_ID), toChain: String(ARC_CHAIN_ID), fromToken: r.tokenIn.address, toToken: r.tokenOut.address,
+    fromChain: String(ARC_CHAIN_ID), toChain: String(ARC_CHAIN_ID), fromToken: r.tokenIn.address.toLowerCase(), toToken: r.tokenOut.address.toLowerCase(),
     fromAmount: r.amountIn.toString(), fromAddress: r.user, toAddress: r.user, slippage: String(r.slippageBps / 10_000),
   })
   const d = await getJson<LifiQuote>(`https://li.quest/v1/quote?${qs}`)

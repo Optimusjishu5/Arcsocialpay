@@ -1,67 +1,96 @@
 'use client'
 
 import { useState } from 'react'
-import { ArrowLeftRight, CircleDollarSign, Layers, Link2, Route, Sparkles } from 'lucide-react'
-import type { LucideIcon } from 'lucide-react'
+import { ArrowLeft, CircleDollarSign, Link2 } from 'lucide-react'
+import { BestPriceView } from './swap/BestPriceView'
+import { AnyTokenView } from './swap/AnyTokenView'
 import { CircleSwap } from './swap/CircleSwap'
-import { ProviderSwap } from './swap/ProviderSwap'
 import { CctpBridge } from './bridge/CctpBridge'
-import { GradientIcon, toneVars, type Tone } from './dashboard/ui'
+import { toneVars } from './dashboard/ui'
 
-type TabId = 'uniswap' | 'kyber' | 'lifi' | 'circle' | 'cctp'
+type Mode = 'best' | 'any'
+type Extra = 'circle' | 'cctp' | null
 
-const TABS: { id: TabId; label: string; hint: string; icon: LucideIcon; tone: Tone }[] = [
-  { id: 'uniswap', label: 'Uniswap', hint: 'v3 pools on Arc', icon: Sparkles, tone: 'pink' },
-  { id: 'kyber', label: 'KyberSwap', hint: 'Best route', icon: Layers, tone: 'teal' },
-  { id: 'lifi', label: 'LI.FI', hint: 'Aggregator', icon: Route, tone: 'violet' },
-  { id: 'circle', label: 'Circle', hint: 'USDC, EURC, cirBTC', icon: CircleDollarSign, tone: 'blue' },
-  { id: 'cctp', label: 'Circle CCTP', hint: '1:1 native USDC', icon: Link2, tone: 'indigo' },
+const MODES: { id: Mode; title: string; hint: string }[] = [
+  { id: 'best', title: 'Best price', hint: 'KyberSwap + Uniswap + LI.FI' },
+  { id: 'any', title: 'Any token', hint: 'Full LI.FI routing' },
 ]
 
 export function SwapView() {
-  const [tab, setTab] = useState<TabId>('uniswap')
-  const active = TABS.find((t) => t.id === tab) ?? TABS[0]
+  const [mode, setMode] = useState<Mode>('best')
+  const [extra, setExtra] = useState<Extra>(null)
+
   return (
-    <div className="tone-scope max-w-lg mx-auto px-4 pt-4 pb-8 space-y-4" style={toneVars(active.tone)}>
-      <div className="flex items-center gap-3">
-        <GradientIcon icon={ArrowLeftRight} tone="violet" size={44} />
-        <div>
-          <h2 className="display font-bold text-xl leading-tight" style={{ color: 'var(--ink)', letterSpacing: '-0.02em' }}>Swap on Arc</h2>
-          <p className="text-xs" style={{ color: 'var(--muted)' }}>Every token on Arc, priced by the route you choose</p>
-        </div>
+    <div className="tone-scope max-w-lg mx-auto px-4 pt-4 pb-8 space-y-4" style={toneVars('indigo')}>
+      <div className="flex justify-center">
+        <span
+          className="inline-flex items-center gap-2 h-9 px-4 rounded-full text-sm font-semibold"
+          style={{ background: 'var(--surface-strong)', border: '1px solid var(--border)', color: 'var(--tone-text, var(--ink))' }}
+        >
+          <span className="w-2.5 h-2.5 rounded-full" style={{ background: 'var(--success)' }} aria-hidden />
+          Arc Mainnet · real funds, real fees
+        </span>
       </div>
 
-      <div role="tablist" aria-label="Swap route" className="flex gap-2 overflow-x-auto -mx-4 px-4 pb-1 snap-x" style={{ scrollbarWidth: 'none' }}>
-        {TABS.map((t) => {
-          const isActive = tab === t.id
-          return (
+      {extra === null ? (
+        <>
+          <div role="tablist" aria-label="Swap mode" className="relative grid grid-cols-2 gap-1 p-1.5 rounded-full" style={{ background: 'var(--surface-strong)', border: '1px solid var(--border)' }}>
+            {MODES.map((m) => {
+              const active = mode === m.id
+              return (
+                <button
+                  key={m.id}
+                  role="tab"
+                  aria-selected={active}
+                  onClick={() => setMode(m.id)}
+                  className="relative h-14 rounded-full flex flex-col items-center justify-center leading-tight transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus)]"
+                  style={{ color: active ? '#fff' : 'var(--ink)' }}
+                >
+                  {active && (
+                    <span
+                      className="absolute inset-0 rounded-full"
+                      style={{ background: 'linear-gradient(135deg, #4f6bff, #3b4fe8)', boxShadow: '0 10px 22px -10px rgba(59,79,232,0.7)' }}
+                    />
+                  )}
+                  <span className="relative text-base font-bold">{m.title}</span>
+                  <span className="relative text-[11px]" style={{ opacity: active ? 0.85 : 0.6 }}>{m.hint}</span>
+                </button>
+              )
+            })}
+          </div>
+
+          {mode === 'best' ? <BestPriceView key="best" /> : <AnyTokenView key="any" />}
+
+          <div className="flex flex-wrap items-center justify-center gap-2 pt-1">
+            <span className="text-xs" style={{ color: 'var(--subtle)' }}>More routes</span>
             <button
-              key={t.id}
-              role="tab"
-              aria-selected={isActive}
-              onClick={() => setTab(t.id)}
-              className="snap-start flex-shrink-0 flex items-center gap-2.5 px-3 h-14 min-w-[148px] rounded-2xl transition-all active:scale-95 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus)]"
-              style={{
-                background: isActive ? 'var(--surface-strong)' : 'var(--surface)',
-                border: `1.5px solid ${isActive ? 'var(--border-strong)' : 'var(--border)'}`,
-                boxShadow: isActive ? '0 10px 24px -12px rgba(8,20,40,0.45)' : 'none',
-              }}
+              onClick={() => setExtra('circle')}
+              className="inline-flex items-center gap-1.5 h-9 px-3 rounded-full text-xs font-semibold"
+              style={{ background: 'var(--surface-strong)', border: '1px solid var(--border)', color: 'var(--ink)' }}
             >
-              <GradientIcon icon={t.icon} tone={t.tone} size={34} />
-              <span className="flex flex-col leading-tight">
-                <span className="text-sm font-semibold whitespace-nowrap" style={{ color: isActive ? 'var(--ink)' : 'var(--muted)' }}>{t.label}</span>
-                <span className="text-[10px] whitespace-nowrap" style={{ color: 'var(--subtle)' }}>{t.hint}</span>
-              </span>
+              <CircleDollarSign size={14} /> Circle swap
             </button>
-          )
-        })}
-      </div>
-
-      {tab === 'uniswap' && <ProviderSwap key="uniswap" providerId="uniswap" />}
-      {tab === 'kyber' && <ProviderSwap key="kyber" providerId="kyber" />}
-      {tab === 'lifi' && <ProviderSwap key="lifi" providerId="lifi" />}
-      {tab === 'circle' && <CircleSwap />}
-      {tab === 'cctp' && <CctpBridge />}
+            <button
+              onClick={() => setExtra('cctp')}
+              className="inline-flex items-center gap-1.5 h-9 px-3 rounded-full text-xs font-semibold"
+              style={{ background: 'var(--surface-strong)', border: '1px solid var(--border)', color: 'var(--ink)' }}
+            >
+              <Link2 size={14} /> Circle CCTP 1:1 USDC
+            </button>
+          </div>
+        </>
+      ) : (
+        <>
+          <button
+            onClick={() => setExtra(null)}
+            className="inline-flex items-center gap-1.5 h-9 px-3 rounded-full text-sm font-semibold"
+            style={{ background: 'var(--surface-strong)', border: '1px solid var(--border)', color: 'var(--ink)' }}
+          >
+            <ArrowLeft size={14} /> Back to swap
+          </button>
+          {extra === 'circle' ? <CircleSwap /> : <CctpBridge />}
+        </>
+      )}
     </div>
   )
 }

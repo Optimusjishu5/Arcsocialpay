@@ -1,8 +1,11 @@
 'use client'
 
-import { ProviderSwap } from './ProviderSwap'
+import { BestPriceView } from './BestPriceView'
+import type { SwapProviderId } from '../../lib/swapProviders'
 
-/** Uniswap v3 pools on Arc. */
+const UNISWAP_ONLY: readonly SwapProviderId[] = ['uniswap']
+
+/** Uniswap v3 pools on Arc, priced on their own. */
 export function UniswapSwap() {
-  return <ProviderSwap providerId="uniswap" />
+  return <BestPriceView routes={UNISWAP_ONLY} />
 }
