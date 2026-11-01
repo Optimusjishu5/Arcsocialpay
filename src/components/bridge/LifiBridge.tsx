@@ -148,6 +148,8 @@ export function LifiBridge() {
         fromAddress: req.user, toAddress: req.recipient, kind: 'bridge', symbol: 'USDC',
         summary: `${amount.trim()} USDC from ${fromChain.name} to ${toChain.name} via LI.FI`,
       })
+      // The source leg is confirmed; the transfer is "Processing" until the destination leg is delivered.
+      appStore.updateTxRecord(lastHash, { status: 'processing' })
       setPhase('tracking'); setDelivery('pending'); stopPoll.current = false
       for (let i = 0; i < POLL_MAX && !stopPoll.current; i++) {
         const s = await getDeliveryStatus(quote, req, lastHash)

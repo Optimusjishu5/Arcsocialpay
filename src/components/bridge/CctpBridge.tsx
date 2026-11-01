@@ -153,7 +153,9 @@ export function CctpBridge() {
           fromAddress: address, toAddress: address, kind: 'bridge', symbol: 'USDC',
           summary: `${amount.trim()} USDC from ${fromDef.name} to ${toDef.name} via Circle`,
         })
+        // Burned on the source chain; "Processing" until the mint on the destination chain is done.
         if (res.state === 'success') appStore.confirmTxRecord(burnHash)
+        else appStore.updateTxRecord(burnHash, { status: 'processing' })
       }
       if (res.state === 'error') {
         const failed = res.steps.find((s) => s.state === 'error')

@@ -4,6 +4,7 @@
 import { decodeEventLog, formatUnits, getAddress, pad, zeroAddress, type PublicClient } from 'viem'
 import type { TxRecord } from '@/types/index'
 import { SOCIAL_PAY_ABI } from '../contracts/arcSocialPay'
+import { parseMemo } from '../utils/memoTags'
 
 export interface ScanToken { symbol: string; address: string; decimals: number }
 
@@ -28,6 +29,7 @@ function fmt(value: bigint, decimals: number): string {
  * - a payment or tip made through the SocialPay contract
  * - a swap (one token leaves your wallet and a different one arrives in the same transaction)
  * - a bridge arrival (tokens minted to you)
+ * - a batch payment (several recipients in one transaction)
  * - a plain send or receive
  */
 export function classifyActivity(
@@ -104,7 +106,26 @@ export function classifyActivity(
       }
     }
 
-    // 4. Plain send or receive (the biggest transfer in the transaction)
+    // 4. Batch: one transaction that pays several different people the same token (nothing comes back)
+    if (ins.length === 0 && outs.length >= 2) {
+      const byToken = new Map<string, TransferLog[]>()
+      for (const o of outs) byToken.set(o.token.toLowerCase(), [...(byToken.get(o.token.toLowerCase()) ?? []), o])
+      const group = [...byToken.values()].sort((a, b) => b.length - a.length)[0]
+      const people = new Set(group.map((o) => o.to.toLowerCase()))
+      const tok = tokenOf(group[0].token)
+      if (tok && people.size >= 2 && group.length === outs.length) {
+        const total = group.reduce((n, o) => n + o.value, 0n)
+        const biggest = group.reduce((best, o) => (o.value > best.value ? o : best))
+        out.push({
+          ...base, kind: 'batch', direction: 'sent', amount: fmt(total, tok.decimals),
+          symbol: tok.symbol === 'USDC' ? undefined : tok.symbol, fromAddress: me, toAddress: biggest.to,
+          summary: `${people.size} recipients`,
+        })
+        continue
+      }
+    }
+
+    // 5. Plain send or receive (the biggest transfer in the transaction)
     const pick = (list: TransferLog[]) => list.reduce((best, t) => (t.value > best.value ? t : best))
     if (outs.length > 0) {
       const o = pick(outs); const t = tokenOf(o.token)
@@ -398,7 +419,7 @@ export async function scanRange(
 /** Adds the memo (or the tipped post) to payments that went through the SocialPay contract, read from their receipts. */
 async function addPaymentNotes(client: PublicClient, socialPay: string | null, records: ScannedRecord[]): Promise<void> {
   if (!socialPay) return
-  const payments = records.filter((r) => r.kind === 'payment' && !r.symbol).slice(0, 12)
+  const payments = records.filter((r) => r.kind === 'payment' && !r.symbol).slice(0, 60)
   await Promise.all(payments.map(async (r) => {
     try {
       const receipt = await rpc(client, () => client.getTransactionReceipt({ hash: r.txHash as `0x${string}` }))
@@ -408,7 +429,10 @@ async function addPaymentNotes(client: PublicClient, socialPay: string | null, r
           const ev = decodeEventLog({ abi: SOCIAL_PAY_ABI, data: log.data, topics: log.topics })
           if (ev.eventName !== 'Payment' && ev.eventName !== 'Tip') continue
           const a = ev.args as unknown as { memo?: string; postId?: string }
-          r.note = (ev.eventName === 'Tip' ? a.postId || 'Tip' : a.memo) || r.note
+          const memo = parseMemo(ev.eventName === 'Tip' ? a.postId || 'Tip' : a.memo)
+          // The sender's tag labels the payment for both sides (batch, request, split or scheduled).
+          if (memo.kind) r.kind = memo.kind
+          r.note = memo.note || r.note
         } catch { /* a different event from the same contract */ }
       }
     } catch { /* no note, the payment still shows */ }

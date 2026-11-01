@@ -12,6 +12,7 @@
 import { getAddress, zeroAddress } from 'viem'
 import type { TxRecord } from '@/types/index'
 import { ARC_CHAIN_ID } from '../chains'
+import { parseMemo } from '../utils/memoTags'
 import { classifyActivity, SYSTEM_EMITTER, type ScanToken, type TransferLog } from './onchainActivity'
 
 export const USDC_ERC20 = '0x3600000000000000000000000000000000000000'
@@ -209,7 +210,15 @@ export function buildRecords(me: string, s: Seen, aboveBlock: number, skip: Set<
     const key = r.txHash.toLowerCase()
     have.add(key)
     const tx = s.txs.get(key)
-    out.push({ ...r, timestamp: timeOf(r.txHash, r.blockNumber), ...(tx?.failed ? { status: 'failed' as const } : {}), ...(r.kind === 'payment' && tx?.note && !r.note ? { note: tx.note } : {}) })
+    // A payment made through the SocialPay contract carries its origin tag and note in the memo.
+    const memo = r.kind === 'payment' ? parseMemo(tx?.note) : {}
+    out.push({
+      ...r,
+      timestamp: timeOf(r.txHash, r.blockNumber),
+      ...(memo.kind ? { kind: memo.kind } : {}),
+      ...(memo.note && !r.note ? { note: memo.note } : {}),
+      ...(tx?.failed ? { status: 'failed' as const } : {}),
+    })
   }
 
   // 2. Transactions the wallet sent that moved nothing: approvals, contract calls, failures

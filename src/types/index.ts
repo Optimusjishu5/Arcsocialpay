@@ -99,7 +99,12 @@ export interface Group {
 
 // ── Transactions ───────────────────────────────────────────────────────────
 
-export type TxStatus = 'pending' | 'confirmed' | 'failed'
+/**
+ * pending: sent, not yet in a block. processing: in flight across chains (a bridge whose
+ * destination leg has not finished). confirmed / failed: final onchain result.
+ * cancelled: the network dropped it or it was replaced, so it never happened.
+ */
+export type TxStatus = 'pending' | 'processing' | 'confirmed' | 'failed' | 'cancelled'
 export type TxDirection = 'sent' | 'received'
 /** What a history entry is. Missing means a plain payment. */
 /**

@@ -20,7 +20,13 @@ export const TX_CATEGORY_META: Record<TxCategory, { label: string; icon: LucideI
   other: { label: 'Other', icon: FileCode2, tone: 'indigo' },
 }
 
-const OWN_PAYMENT_TITLE = { batch: 'Batch payment', request: 'Request paid', split: 'Split payment', schedule: 'Scheduled payment' } as const
+type ToolKind = 'batch' | 'request' | 'split' | 'schedule'
+const TOOL_TITLE: Record<ToolKind, { sent: string; received: string }> = {
+  batch: { sent: 'Batch payment', received: 'Batch payment received' },
+  request: { sent: 'Request paid', received: 'Request payment received' },
+  split: { sent: 'Split payment', received: 'Split share received' },
+  schedule: { sent: 'Scheduled payment', received: 'Scheduled payment received' },
+}
 
 export interface TxView {
   kind: 'payment' | 'swap' | 'bridge'
@@ -59,20 +65,22 @@ export function describeTx(t: TxRecord, me: string): TxView {
   }
   const sent = isSameAddress(t.fromAddress, me)
   // Batch rows saved before the type was recorded carry this note.
-  const own: keyof typeof OWN_PAYMENT_TITLE | undefined =
-    sent && (t.kind === 'batch' || t.kind === 'request' || t.kind === 'split' || t.kind === 'schedule')
+  const tool: ToolKind | undefined =
+    t.kind === 'batch' || t.kind === 'request' || t.kind === 'split' || t.kind === 'schedule'
       ? t.kind
       : sent && t.note === 'Batch transfer' ? 'batch' : undefined
-  const category: TxCategory = own ?? (sent ? 'send' : 'receive')
+  const category: TxCategory = tool ?? (sent ? 'send' : 'receive')
   const meta = TX_CATEGORY_META[category]
-  const note = own === 'batch' && t.note === 'Batch transfer' ? '' : t.note
+  const note = tool === 'batch' && t.note === 'Batch transfer' ? '' : t.note
+  // A batch sent in one transaction names how many people it paid.
+  const batchSummary = tool === 'batch' && t.summary && !t.note ? t.summary : ''
   return {
     kind: 'payment',
     category,
     icon: meta.icon,
     tone: meta.tone,
-    title: own ? OWN_PAYMENT_TITLE[own] : sent ? 'Sent' : 'Received',
-    detail: `${sent ? 'To' : 'From'} ${formatAddress(sent ? t.toAddress : t.fromAddress)}${note ? ` · ${note}` : ''}`,
+    title: tool ? TOOL_TITLE[tool][sent ? 'sent' : 'received'] : sent ? 'Sent' : 'Received',
+    detail: `${sent ? 'To' : 'From'} ${formatAddress(sent ? t.toAddress : t.fromAddress)}${note ? ` · ${note}` : batchSummary ? ` · ${batchSummary}` : ''}`,
     amountText: `${t.amount} ${symbol}`,
     sign: sent ? '-' : '+',
   }

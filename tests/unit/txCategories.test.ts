@@ -32,8 +32,13 @@ describe('transaction categories', () => {
     expect(v.detail).not.toContain('Batch transfer')
   })
 
-  test('a received payment is never labelled as one of your own tools', () => {
-    expect(describeTx(tx(1, { kind: 'request', fromAddress: YOU, toAddress: ME, direction: 'received' }), ME).category).toBe('receive')
+  test('a payment you receive from a request, split or batch keeps that label, worded for the receiver', () => {
+    const r = (kind: TxRecord['kind']) => describeTx(tx(1, { kind, fromAddress: YOU, toAddress: ME, direction: 'received' }), ME)
+    expect(r('request').category).toBe('request')
+    expect(r('request').title).toBe('Request payment received')
+    expect(r('split').title).toBe('Split share received')
+    expect(r('batch').title).toBe('Batch payment received')
+    expect(r('request').sign).toBe('+')
   })
 
   test('counts add up to the total', () => {

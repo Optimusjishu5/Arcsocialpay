@@ -123,7 +123,14 @@ type MinimalPublicClient = {
     blockNumber: bigint
     logs: MinimalReceiptLog[]
   }>
+  getTransaction?: (args: { hash: `0x${string}` }) => Promise<unknown>
 }
+
+/** A pending payment the network has never heard of after this long was dropped or replaced. */
+export const CANCEL_AFTER_MS = 10 * 60 * 1000
+
+const looksNotFound = (e: unknown) =>
+  /NotFound/i.test(String((e as { name?: string })?.name ?? '')) || /could not be found|not found/i.test(String((e as Error)?.message ?? ''))
 
 function amountsMatch(stored: string, onchain: string): boolean {
   // Exact bigint compare (no parseFloat): parse both as 6-dec USDC raw.
@@ -155,12 +162,14 @@ function deriveUsdcAmountFromLogs(logs: MinimalReceiptLog[]): string | null {
 
 export async function reconcileStoredTxHistory(
   publicClient: MinimalPublicClient | null | undefined,
-  txHistory: TxRecord[]
+  txHistory: TxRecord[],
+  now: number = Date.now()
 ): Promise<void> {
   if (!publicClient) return
-  // Only pending records need revalidation (confirmed/failed are terminal).
+  // Only pending Arc records need revalidation (confirmed, failed and cancelled are final; bridges
+  // that started on another chain are tracked by their own flow).
   // This bounds RPC fan-out to a handful of hashes on load.
-  const pending = txHistory.filter((t) => t.status === 'pending')
+  const pending = txHistory.filter((t) => t.status === 'pending' && t.chainId === ARC_CHAIN_ID)
   for (const tx of pending) {
     try {
       const receipt = await publicClient.getTransactionReceipt({
@@ -181,8 +190,17 @@ export async function reconcileStoredTxHistory(
         continue
       }
       confirmTx(tx.txHash, safeBlock)
-    } catch {
-      // Best-effort: unknown hash / RPC error → leave pending for next load.
+    } catch (e) {
+      // Best-effort: an RPC error leaves the record pending for the next load. A transaction the
+      // network does not know at all, after a long wait, was dropped or replaced: it never happened.
+      if (looksNotFound(e) && publicClient.getTransaction && now - tx.timestamp > CANCEL_AFTER_MS) {
+        try {
+          const known = await publicClient.getTransaction({ hash: tx.txHash as `0x${string}` })
+          if (!known) appStore.updateTxRecord(tx.txHash, { status: 'cancelled' })
+        } catch (e2) {
+          if (looksNotFound(e2)) appStore.updateTxRecord(tx.txHash, { status: 'cancelled' })
+        }
+      }
     }
   }
 }

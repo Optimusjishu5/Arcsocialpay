@@ -16,6 +16,7 @@ import { copyText } from '../utils/copy'
 import { ShareLinkBox } from './pay/ShareLinkBox'
 import { GradientIcon, toneVars, type Tone } from './dashboard/ui'
 import { buildRequestPath } from '../utils/payRequests'
+import { tagMemo } from '../utils/memoTags'
 import { useScheduledPayments } from '../hooks/useScheduledPayments'
 import { BatchForm } from './pay/BatchForm'
 import { PayHistory } from './pay/PayHistory'
@@ -91,7 +92,7 @@ interface Props {
   onNavigate: (view: NavView, extra?: Record<string, string>) => void
 }
 
-export function PayView({ initialMode = 'send', initialRecipient, initialAmount, initialNote, initialVia, initialExpiresAt, onNavigate }: Props) {
+export function PayView({ initialMode = 'send', initialRecipient, initialAmount, initialNote, initialVia, initialExpiresAt }: Props) {
   const [mode, setMode] = useState<PayMode>(initialMode)
   const [openedAt] = useState(() => Date.now())
   const linkExpired = initialExpiresAt !== undefined && initialExpiresAt <= openedAt
@@ -385,8 +386,16 @@ function SendForm({
     // Receipt gating + tx records reuse the shared activeHash/activeReceipt effects above.
     if (useContract) {
       sendSnapshotRef.current = { recipient, amount: trimmed, note, fromAddress: myAddress }
+      // The onchain memo carries where the payment came from (request, split or scheduled), so every
+      // device and the explorer can label it without this browser's records.
+      const fromTool = origin && initialRecipient && recipient.trim().toLowerCase() === initialRecipient.toLowerCase() ? origin : undefined
+      const memo = tagMemo(fromTool, note)
+      if (new TextEncoder().encode(memo).length > 280) {
+        setLocalError('That note is too long for the payment contract (280 bytes). Shorten it and try again.')
+        return
+      }
       try {
-        void sp.requestPay(recipient, trimmed, note)
+        void sp.requestPay(recipient, trimmed, memo)
       } catch (e) {
         setLocalError(parseOnchainError(e))
       }

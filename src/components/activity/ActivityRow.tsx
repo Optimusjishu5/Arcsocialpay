@@ -37,7 +37,7 @@ function CopyValue({ value, shown, label }: { value: string; shown: string; labe
 export function ActivityRow({ entry: e }: { entry: Entry }) {
   const [open, setOpen] = useState(false)
   const t = e.tx
-  const failed = t?.status === 'failed'
+  const failed = t?.status === 'failed' || t?.status === 'cancelled'
   const amountColor = failed ? 'var(--subtle)' : e.amount?.sign === '-' ? 'var(--danger)' : 'var(--success)'
   const panelId = `activity-${e.id}`
 

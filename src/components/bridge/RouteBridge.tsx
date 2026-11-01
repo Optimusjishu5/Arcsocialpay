@@ -149,6 +149,8 @@ export function RouteBridge() {
         txHash: lastHash, chainId: fromDef.chainId, direction: 'sent', amount: amount.trim(),
         fromAddress: reqUsed.user, toAddress: reqUsed.user, kind: 'bridge', symbol: 'USDC', summary,
       })
+      // The source leg is confirmed; the transfer is "Processing" until the destination leg is delivered.
+      appStore.updateTxRecord(lastHash, { status: 'processing' })
       setPhase('tracking'); setDelivery('pending'); stopPoll.current = false
       // Source transaction is confirmed; wait for the provider to report delivery.
       for (let i = 0; i < 150 && !stopPoll.current; i++) {
