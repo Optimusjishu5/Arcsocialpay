@@ -1,15 +1,15 @@
 'use client'
 
 import type { ReactNode } from 'react'
-import { AlertCircle, Check, ExternalLink, Layers, Route, Sparkles } from 'lucide-react'
+import { AlertCircle, Check, Layers, Route, Sparkles } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 import { ARC_CHAIN_ID } from '../../chains'
-import { buildTxExplorerUrl } from '@/onchain-facts'
 import { GradientIcon, type Tone } from '../dashboard/ui'
 import { Reveal } from './SwapPanel'
 import { formatTokenAmount, type ArcToken } from '../../lib/arcTokens'
 import type { SwapProviderId, SwapQuote } from '../../lib/swapProviders'
 import { LogoImg } from '../ui/LogoImg'
+import { TxReceipt } from '../ui/TxReceipt'
 
 export const ROUTE_META: Record<SwapProviderId, { name: string; icon: LucideIcon; tone: Tone }> = {
   uniswap: { name: 'Uniswap', icon: Sparkles, tone: 'pink' },
@@ -83,14 +83,11 @@ export function Notices({ error, doneHash, warning, noRoute, tokenIn, tokenOut, 
         </div>
       </Reveal>
       <Reveal show={!!doneHash}>
-        <div className="flex items-start gap-2 p-3 rounded-xl text-sm" style={{ background: 'var(--success-bg)', color: 'var(--success)' }}>
-          <Check size={16} className="flex-shrink-0 mt-0.5" />
-          <span>
-            Swap confirmed.{' '}
-            <a href={buildTxExplorerUrl(ARC_CHAIN_ID, doneHash)} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 underline">
-              Explorer <ExternalLink size={12} />
-            </a>
-          </span>
+        <div className="space-y-2">
+          <div className="flex items-center gap-2 p-3 rounded-xl text-sm font-semibold" style={{ background: 'var(--success-bg)', color: 'var(--success)' }}>
+            <Check size={16} className="flex-shrink-0" /> Swap successful
+          </div>
+          <TxReceipt hash={doneHash} chainId={ARC_CHAIN_ID} label="Swap" />
         </div>
       </Reveal>
       {warning}

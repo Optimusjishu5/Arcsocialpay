@@ -4,13 +4,14 @@ import { useEffect, useState } from 'react'
 import { createPublicClient, erc20Abi, formatUnits, http, parseUnits } from 'viem'
 import { useAccount, useSwitchChain } from 'wagmi'
 import { ConnectKitButton } from 'connectkit'
-import { AlertCircle, Check, ExternalLink } from 'lucide-react'
+import { AlertCircle, Check } from 'lucide-react'
 import type { SwapEstimate } from '@circle-fin/app-kit'
 import { Button } from '../ui/Button'
 import { createWalletAdapter, getKit, getMainnetBridgeChains, kitErrorMessage } from '../../lib/circleKit'
 import { ARC_CHAIN_ID, ARC_RPC_URL, arcMainnet } from '../../chains'
 import { appStore } from '../../store/appStore'
 import { AmountCard, FlipButton, SlippagePicker } from './SwapPanel'
+import { TxReceipt } from '../ui/TxReceipt'
 
 /** Short display form of a 6-decimal token amount (display only). */
 function shortAmount(raw: bigint): string {
@@ -207,16 +208,12 @@ export function CircleSwap() {
         )}
 
         {result?.progress.status === 'DONE' && (
-          <div className="flex items-start gap-2 p-3 rounded-xl text-sm" style={{ background: 'var(--success-bg)', color: 'var(--success)' }}>
-            <Check size={16} className="flex-shrink-0 mt-0.5" />
-            <span>
-              Swapped. You received {result.amountOut ?? 'your tokens'} {result.tokenOut}.{' '}
-              {result.explorerUrl && (
-                <a href={result.explorerUrl} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 underline">
-                  Explorer <ExternalLink size={12} />
-                </a>
-              )}
-            </span>
+          <div className="space-y-2">
+            <div className="flex items-start gap-2 p-3 rounded-xl text-sm" style={{ background: 'var(--success-bg)', color: 'var(--success)' }}>
+              <Check size={16} className="flex-shrink-0 mt-0.5" />
+              <span><strong>Swap successful.</strong> You received {result.amountOut ?? 'your tokens'} {result.tokenOut}.</span>
+            </div>
+            <TxReceipt hash={result.txHash} label="Swap" explorerUrl={result.explorerUrl} />
           </div>
         )}
 

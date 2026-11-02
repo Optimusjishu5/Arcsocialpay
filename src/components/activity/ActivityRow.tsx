@@ -1,10 +1,13 @@
 'use client'
 
-import { useState } from 'react'
+import { memo, useState } from 'react'
 import { motion } from 'framer-motion'
-import { ChevronDown, Copy, ExternalLink } from 'lucide-react'
+import { ChevronDown, Copy } from 'lucide-react'
 import { GradientIcon } from '../dashboard/ui'
 import { TxStatusBadge } from '../ui/TxStatusBadge'
+import { ExplorerLinks } from '../ui/ExplorerLinks'
+import { TxVerification } from '../ui/TxVerification'
+import { isArcChain } from '../../lib/arcExplorers'
 import { copyText } from '../../utils/copy'
 import { formatAddress, formatFullTimestamp, formatTimestamp } from '../../utils/format'
 import type { Entry } from './entries'
@@ -34,15 +37,17 @@ function CopyValue({ value, shown, label }: { value: string; shown: string; labe
   )
 }
 
-export function ActivityRow({ entry: e }: { entry: Entry }) {
+function ActivityRowView({ entry: e }: { entry: Entry }) {
   const [open, setOpen] = useState(false)
   const t = e.tx
   const failed = t?.status === 'failed' || t?.status === 'cancelled'
   const amountColor = failed ? 'var(--subtle)' : e.amount?.sign === '-' ? 'var(--danger)' : 'var(--success)'
   const panelId = `activity-${e.id}`
+  // Read from a block by the explorers or the node (not just saved on this device): the hash needs no further check.
+  const chainSeen = !!t && t.blockNumber !== undefined && t.status !== 'pending'
 
   return (
-    <div className="rounded-2xl transition-colors hover:bg-[var(--surface-muted)]/60">
+    <div className="rounded-2xl transition-colors hover:bg-[var(--surface-muted)]/60" style={open ? undefined : { contentVisibility: 'auto', containIntrinsicSize: 'auto 64px' }}>
       <div className="flex items-center gap-1 pr-1">
         <button
           type="button"
@@ -71,13 +76,7 @@ export function ActivityRow({ entry: e }: { entry: Entry }) {
               style={{ color: 'var(--subtle)', transform: open ? 'rotate(180deg)' : undefined }} />
           )}
         </button>
-        {e.url && t && (
-          <a href={e.url} target="_blank" rel="noopener noreferrer" aria-label="View on Arc Explorer"
-            className="w-10 h-10 rounded-full flex items-center justify-center flex-shrink-0 transition-colors hover:bg-[var(--surface-strong)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus)]"
-            style={{ color: 'var(--muted)' }}>
-            <ExternalLink size={15} />
-          </a>
-        )}
+        {t && <ExplorerLinks hash={t.txHash} chainId={t.chainId} trusted={chainSeen} variant="icon" />}
       </div>
 
       {open && t && (
@@ -104,8 +103,22 @@ export function ActivityRow({ entry: e }: { entry: Entry }) {
           <div className="col-span-2 min-w-0">
             <Field label="Transaction hash"><CopyValue value={t.txHash} shown={formatAddress(t.txHash)} label="Hash" /></Field>
           </div>
+          <div className="col-span-2 min-w-0 flex flex-col gap-2">
+            <ExplorerLinks hash={t.txHash} chainId={t.chainId} trusted={chainSeen} variant="text" />
+            {isArcChain(t.chainId) && <TxVerification hash={t.txHash} />}
+          </div>
         </motion.dl>
       )}
     </div>
   )
 }
+
+/** Rows are rebuilt on every change to the list; a row only redraws when what it shows changed. */
+const sameEntry = (a: { entry: Entry }, b: { entry: Entry }): boolean => {
+  const x = a.entry, y = b.entry
+  return x.id === y.id && x.at === y.at && x.title === y.title && x.detail === y.detail && x.category === y.category &&
+    x.amount?.text === y.amount?.text && x.amount?.sign === y.amount?.sign &&
+    x.tx?.status === y.tx?.status && x.tx?.blockNumber === y.tx?.blockNumber && x.tx?.kind === y.tx?.kind &&
+    x.tx?.summary === y.tx?.summary && x.tx?.note === y.tx?.note
+}
+export const ActivityRow = memo(ActivityRowView, sameEntry)

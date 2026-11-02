@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { Send as SendIcon, Layers, HandCoins, Users, CalendarClock, ArrowDownLeft, Copy, Check, ExternalLink, QrCode, AlertCircle, X } from 'lucide-react'
+import { Send as SendIcon, Layers, HandCoins, Users, CalendarClock, ArrowDownLeft, Copy, Check, QrCode, AlertCircle, X } from 'lucide-react'
 import { ConnectKitButton } from 'connectkit'
 import { isAddress } from 'viem'
 import { useWaitForTransactionReceipt } from 'wagmi'
@@ -24,6 +24,10 @@ import { RequestForm } from './pay/RequestForm'
 import { SplitBillForm } from './pay/SplitBillForm'
 import { ScheduleForm } from './pay/ScheduleForm'
 import type { NavView } from '../types/index'
+import { parseUsdc } from '@/onchain-money'
+import { useSettings } from '../hooks/useSettings'
+import { approvalAmount, limitToRaw } from '../utils/approval'
+import { TxReceipt } from './ui/TxReceipt'
 
 // Keep 0.1 USDC back so the user can still pay gas (USDC is the gas token on Arc).
 const GAS_RESERVE_RAW = 100_000n // 0.1 USDC in 6-decimal units
@@ -90,6 +94,23 @@ interface Props {
   /** Expiry of the payment link that opened this page (ms epoch). */
   initialExpiresAt?: number
   onNavigate: (view: NavView, extra?: Record<string, string>) => void
+}
+
+/** Says whether this payment needs an approval transaction first, and for how much. */
+function ApprovalRow({ amount, allowance, loading, limit }: { amount: string; allowance: bigint; loading: boolean; limit: string }) {
+  let text = 'Checking...'
+  if (!loading) {
+    let raw = 0n
+    try { raw = parseUsdc(amount.trim()) } catch { /* the form already rejects bad amounts */ }
+    text = allowance >= raw
+      ? 'Not needed, already approved'
+      : `Once, up to ${formatUsdcDisplay(approvalAmount(raw, limitToRaw(limit)))} USDC (set in Settings)`
+  }
+  return (
+    <PreviewRow label="Approval">
+      <span className="text-sm text-right" style={{ color: 'var(--ink-2)' }}>{text}</span>
+    </PreviewRow>
+  )
 }
 
 export function PayView({ initialMode = 'send', initialRecipient, initialAmount, initialNote, initialVia, initialExpiresAt }: Props) {
@@ -269,12 +290,13 @@ function SendForm({
   }, [initialRecipient])
 
   const {
-    send, hash, isPending, isConfirming, isSuccess, isError, error, explorerUrl, isWrongChain, reset,
+    send, hash, isPending, isConfirming, isSuccess, isError, error, isWrongChain, reset,
   } = useSendUsdc()
 
   // ArcSocialPay contract path — active once NEXT_PUBLIC_SOCIAL_PAY_ADDRESS
   // is set (post Remix deployment). Direct transfers stay the fallback.
   const sp = useSocialPay()
+  const { allowanceLimit } = useSettings()
   const useContract = sp.isConfigured
   const activeHash = useContract ? sp.actionHash : hash
 
@@ -283,7 +305,6 @@ function SendForm({
   // Direct-path only; the contract path reads sp.actionReceipt instead.
   const { data: receipt, isError: isReceiptError } = useWaitForTransactionReceipt({ hash })
   const activeReceipt = useContract ? sp.actionReceipt : receipt
-  const activeExplorerUrl = useContract ? sp.explorerUrl : explorerUrl
 
   // H1: record pending as soon as we have a hash.
   useEffect(() => {
@@ -444,18 +465,11 @@ function SendForm({
           style={{ background: 'var(--success-bg)', color: 'var(--success)' }}>
           <Check size={28} />
         </div>
-        <h3 className="display font-bold text-xl mb-1" style={{ color: 'var(--ink)' }}>Sent!</h3>
+        <h3 className="display font-bold text-xl mb-1" style={{ color: 'var(--ink)' }}>Successful</h3>
         <p className="text-sm mb-4" style={{ color: 'var(--muted)' }}>
           {amount} USDC sent to {formatAddress(recipient)}
         </p>
-        {activeExplorerUrl && (
-          <a href={activeExplorerUrl} target="_blank" rel="noopener noreferrer"
-            className="inline-flex items-center gap-1.5 text-sm font-medium mb-6"
-            style={{ color: 'var(--accent)' }}>
-            <ExternalLink size={14} />
-            View on Arc Explorer
-          </a>
-        )}
+        {activeHash && <TxReceipt hash={activeHash} label="Payment" className="mb-6" />}
         <Button onClick={handleReset} className="w-full">Send Another</Button>
       </motion.div>
     )
@@ -516,6 +530,7 @@ function SendForm({
               <span className="text-sm" style={{ color: 'var(--ink-2)' }}>SocialPay contract</span>
             </PreviewRow>
           )}
+          {useContract && <ApprovalRow amount={amount} allowance={sp.allowance} loading={sp.allowanceLoading} limit={allowanceLimit} />}
           {note && <PreviewRow label="Note"><span className="text-sm" style={{ color: 'var(--ink-2)' }}>{note}</span></PreviewRow>}
 
           {errMsg && (

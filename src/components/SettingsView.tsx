@@ -6,13 +6,16 @@ import { ConnectKitButton } from 'connectkit'
 import { ExternalLink, Moon, ShieldCheck, Sun, Trash2 } from 'lucide-react'
 import { Button } from './ui/Button'
 import { ContractCard } from './settings/ContractCard'
+import { ApprovalCard } from './settings/ApprovalCard'
 import { ARC_CHAIN_ID, useArcAccount } from '../hooks/useArcWallet'
-import { ARC_EXPLORER_URL, ARC_RPC_URL } from '../chains'
+import { ARC_RPC_URL } from '../chains'
 import { NOTIF_RULES, useSettings } from '../hooks/useSettings'
 import { useTheme } from '../store/appStore'
 import { formatAddress } from '../utils/format'
+import { ARC_EXPLORERS } from '../lib/arcExplorers'
+import { useOnchainStatus } from '../hooks/useOnchainActivity'
 
-const LOCAL_KEYS = ['arc-socialpay-v1', 'socialpay:scheduled:v1', 'socialpay:settings:v1']
+const LOCAL_KEYS = ['arc-socialpay-v1', 'socialpay:scheduled:v1', 'socialpay:settings:v1', 'socialpay:bridge-checks:v1']
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
@@ -50,6 +53,8 @@ export function SettingsView() {
   const { disconnect } = useDisconnect()
   const { theme, setTheme } = useTheme()
   const { rules, setRule } = useSettings()
+  const history = useOnchainStatus()
+  const explorerState = history.sources[0]?.state
   const [confirmClear, setConfirmClear] = useState(false)
 
   function clearLocalData() {
@@ -67,15 +72,30 @@ export function SettingsView() {
 
       <ContractCard />
 
+      <Section title="Payment approval">
+        <ApprovalCard />
+      </Section>
+
       <Section title="Network">
         <Row label="Network">Arc Mainnet</Row>
         <Row label="Chain ID"><span className="tabnum">{ARC_CHAIN_ID}</span></Row>
         <Row label="RPC"><span className="mono text-xs break-all">{ARC_RPC_URL}</span></Row>
-        <Row label="Explorer">
-          <a href={ARC_EXPLORER_URL} target="_blank" rel="noopener noreferrer"
-            className="inline-flex items-center gap-1" style={{ color: 'var(--accent)' }}>
-            explorer.arc.io <ExternalLink size={12} />
-          </a>
+        <Row label="Explorers">
+          <span className="inline-flex flex-wrap items-center justify-end gap-x-3 gap-y-1">
+            {ARC_EXPLORERS.map((e) => (
+              <a key={e.id} href={e.base} target="_blank" rel="noopener noreferrer"
+                className="inline-flex items-center gap-1" style={{ color: 'var(--accent)' }}>
+                {e.base.replace('https://', '')} <ExternalLink size={12} />
+              </a>
+            ))}
+          </span>
+        </Row>
+        <Row label="History from">
+          <span style={{ color: history.source === 'explorer' ? 'var(--success)' : 'var(--ink)' }}>
+            {history.source === 'explorer' ? 'Arc Explorer'
+              : history.source === 'nodes' ? (explorerState === 'not-configured' ? 'Arc nodes (Arc Explorer needs BLOCKSCOUT_API_KEY)' : 'Arc nodes (Arc Explorer unreachable)')
+              : 'Checking...'}
+          </span>
         </Row>
         <Row label="Gas token">USDC</Row>
         {isConnected && (

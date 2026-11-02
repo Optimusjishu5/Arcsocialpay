@@ -5,18 +5,19 @@
 import { useState } from 'react'
 import {
   Heart, MessageCircle, Repeat2, Share2, Bookmark,
-  MoreHorizontal, ExternalLink, Quote, Coins,
+  MoreHorizontal, Quote, Coins,
   CheckCircle2, Clock, XCircle,
 } from 'lucide-react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { useStore, actions, formatTime, formatCount } from '../store'
 import type { Post } from '../types'
-import { buildTxExplorerUrl, getUsdc } from '../onchain-facts'
+import { getUsdc } from '../onchain-facts'
 import { useReadContract, useWriteContract, useWaitForTransactionReceipt, useSwitchChain, useAccount } from 'wagmi'
 import { erc20Abi, isAddress } from 'viem'
 import { parseAmount, Amount, usdcDecimalsFor } from '../onchain-money'
 import { ARC_CHAIN_ID } from '../hooks/useArcWallet'
 import { ZERO_ADDRESS, AMOUNT_REGEX } from '../utils/format'
+import { ExplorerLinks } from './ui/ExplorerLinks'
 
 interface PostCardProps {
   postId: string
@@ -39,7 +40,6 @@ function Avatar({ userId, size = 40 }: { userId: string; size?: number }) {
 }
 
 function TipStatus({ status, hash, chainId }: { status: string; hash: string; chainId: number }) {
-  const explorerUrl = buildTxExplorerUrl(chainId, hash)
   const icon = status === 'confirmed'
     ? <CheckCircle2 size={12} style={{ color: 'var(--success)' }} />
     : status === 'failed'
@@ -47,17 +47,16 @@ function TipStatus({ status, hash, chainId }: { status: string; hash: string; ch
     : <Clock size={12} style={{ color: 'var(--warning)' }} />
 
   return (
-    <a
-      href={explorerUrl}
-      target="_blank"
-      rel="noopener noreferrer"
-      className="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full border"
-      style={{ borderColor: 'var(--border)', color: 'var(--muted)' }}
-    >
-      {icon}
-      <span className="mono tabular">{status}</span>
-      <ExternalLink size={10} />
-    </a>
+    <span className="inline-flex items-center gap-2">
+      <span
+        className="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full border"
+        style={{ borderColor: 'var(--border)', color: 'var(--muted)' }}
+      >
+        {icon}
+        <span className="mono tabular">{status}</span>
+      </span>
+      <ExplorerLinks hash={hash} chainId={chainId} variant="text" />
+    </span>
   )
 }
 
@@ -494,15 +493,7 @@ function TipModal({ postId, authorId, onClose }: { postId: string; authorId: str
             <CheckCircle2 size={36} className="mx-auto mb-2" style={{ color: 'var(--success)' }} />
             <p className="font-semibold text-sm" style={{ color: 'var(--success)' }}>Tip sent successfully!</p>
             {hash && (
-              <a
-                href={buildTxExplorerUrl(ARC_CHAIN_ID, hash)}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="inline-flex items-center gap-1 mt-2 text-xs"
-                style={{ color: 'var(--accent)' }}
-              >
-                View on explorer <ExternalLink size={12} />
-              </a>
+              <ExplorerLinks hash={hash} chainId={ARC_CHAIN_ID} variant="text" className="justify-center mt-2" />
             )}
             <button
               onClick={onClose}

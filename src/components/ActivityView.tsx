@@ -11,6 +11,7 @@ import { EmptyState } from './ui/EmptyState'
 import { Button } from './ui/Button'
 import { StatCard, glassCard } from './dashboard/ui'
 import { ActivityRow } from './activity/ActivityRow'
+import { SocialPayEvents } from './activity/SocialPayEvents'
 import { CATEGORY_META, FILTERS, countByFilter, groupByDay, matchesQuery, toCsv, type Filter } from './activity/entries'
 import { formatUsdcDisplay, isSameAddress } from '../utils/format'
 import { parseUsdc } from '@/onchain-money'
@@ -197,7 +198,7 @@ export function ActivityView() {
             <section key={g.label} aria-label={g.label}>
               <h3 className="px-1 mb-1.5 text-[11px] font-semibold uppercase tracking-wider" style={{ color: 'var(--subtle)' }}>{g.label}</h3>
               <div className="rounded-3xl p-1.5 flex flex-col" style={glassCard}>
-                {g.entries.map((e) => <ActivityRow key={e.id} entry={e} />)}
+                {g.entries.map((e) => <div key={e.id} className="activity-in"><ActivityRow entry={e} /></div>)}
               </div>
             </section>
           ))}
@@ -211,14 +212,23 @@ export function ActivityView() {
         </div>
       )}
 
+      <SocialPayEvents address={address} />
+
       {chain.source === 'nodes' && !chain.complete && (
         <p className="text-xs px-3 py-2 rounded-xl text-pretty" style={{ background: 'var(--surface-muted)', color: 'var(--muted)' }}>
-          The Arc explorer could not be reached, so history is being read from Arc nodes directly. That is slower and can miss older or other-token transactions until it finishes.
+          {chain.sources.some((x) => x.state === 'not-configured')
+            ? 'Arc Explorer is not connected on this server (it needs BLOCKSCOUT_API_KEY), so history is being read from the Arc nodes. That is slower and can miss older or other-token transactions.'
+            : 'Arc Explorer could not be reached, so history is being read from the Arc nodes. That is slower and can miss older or other-token transactions until it finishes.'}
+        </p>
+      )}
+      {chain.sources.some((x) => x.state === 'rate-limited') && (
+        <p className="text-xs px-3 py-2 rounded-xl text-pretty" style={{ background: 'var(--surface-muted)', color: 'var(--muted)' }}>
+          Arc Explorer is limiting requests right now. New transactions still appear from the Arc network, and the full list retries by itself.
         </p>
       )}
       <p className="text-xs px-1 text-pretty" style={{ color: 'var(--subtle)' }}>
         {chain.source === 'explorer'
-          ? 'Sends, receives, swaps, bridges and other transactions are read from the Arc explorer index and match it by transaction hash.'
+          ? 'Sends, receives, swaps and bridges are read from Arc Explorer, matched by transaction hash, and each transaction is checked against the Arc network when you open it.'
           : 'Sends, receives, swaps and bridges are read from the Arc network and confirmed by transaction hash.'}{' '}
         Posts, comments and reactions are app data stored off-chain.
       </p>

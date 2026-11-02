@@ -13,7 +13,7 @@ import { erc20Abi, isAddress } from 'viem'
 import { ConnectKitButton } from 'connectkit'
 import { toast } from 'sonner'
 import {
-  getUsdc, requireChain, buildTxExplorerUrl, buildAddressExplorerUrl,
+  getUsdc, requireChain,
 } from '../onchain-facts'
 import { parseAmount, Amount, usdcDecimalsFor } from '../onchain-money'
 import { shortAddress } from '../store'
@@ -21,6 +21,8 @@ import TopBar from './TopBar'
 import { ARC_CHAIN_ID } from '../hooks/useArcWallet'
 import { ZERO_ADDRESS, AMOUNT_REGEX, maxSendableRaw, formatUsdcDisplay } from '../utils/format'
 import { copyText } from '../utils/copy'
+import { ExplorerLinks, AddressExplorerLinks } from './ui/ExplorerLinks'
+import { addressLinks } from '../lib/arcExplorers'
 
 const CHAIN_ID = ARC_CHAIN_ID
 
@@ -46,7 +48,6 @@ export default function WalletView() {
     ? Amount.fromRaw(usdcBalance, usdcDecimalsFor(CHAIN_ID)).toFixed(2)
     : '0.00'
 
-  const explorerUrl = address ? buildAddressExplorerUrl(CHAIN_ID, address) : undefined
 
   const copyAddress = () => {
     if (!address) return
@@ -147,17 +148,17 @@ export default function WalletView() {
           label="Refresh"
           onClick={() => { refetch().catch(() => {}) }}
         />
-        {explorerUrl && (
-          <a href={explorerUrl} target="_blank" rel="noopener noreferrer" className="flex-1">
-            <button
+        {addressLinks(address).map((l) => (
+          <a key={l.id} href={l.url} target="_blank" rel="noopener noreferrer" className="flex-1" aria-label={`View address on ${l.label}`}>
+            <span
               className="w-full flex flex-col items-center gap-1.5 py-3 rounded-2xl text-xs font-medium transition-all"
               style={{ background: 'var(--surface-muted)', color: 'var(--ink-2)' }}
             >
               <ExternalLink size={18} />
-              Explorer
-            </button>
+              {l.name}
+            </span>
           </a>
-        )}
+        ))}
       </div>
 
       {/* Tabs */}
@@ -256,8 +257,6 @@ function ActionPill({ icon, label, onClick }: { icon: React.ReactNode; label: st
 }
 
 function ActivityList({ address, chainId }: { address: string; chainId: number }) {
-  // We don't have a real tx indexer, so we show a link to the explorer
-  const explorerUrl = buildAddressExplorerUrl(chainId, address)
   return (
     <div className="px-4 py-6 flex flex-col items-center text-center gap-4">
       <div
@@ -271,19 +270,10 @@ function ActivityList({ address, chainId }: { address: string; chainId: number }
           Transaction history
         </p>
         <p className="text-xs max-w-xs text-pretty" style={{ color: 'var(--muted)' }}>
-          View all your onchain transactions on Arc Explorer.
+          Your full history is in Activity. You can also open your address on Arc Explorer.
         </p>
       </div>
-      <a
-        href={explorerUrl}
-        target="_blank"
-        rel="noopener noreferrer"
-        className="flex items-center gap-2 px-5 py-2.5 rounded-full text-sm font-semibold transition-all"
-        style={{ background: 'var(--accent-soft)', color: 'var(--accent)' }}
-      >
-        Open Arc Explorer
-        <ExternalLink size={14} />
-      </a>
+      <AddressExplorerLinks address={address} variant="text" className="justify-center" />
     </div>
   )
 }
@@ -429,15 +419,7 @@ function SendModal({
             <CheckCircle2 size={40} className="mx-auto mb-3" style={{ color: 'var(--success)' }} />
             <p className="font-semibold" style={{ color: 'var(--success)' }}>Sent successfully!</p>
             {hash && (
-              <a
-                href={buildTxExplorerUrl(CHAIN_ID, hash)}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="inline-flex items-center gap-1 mt-2 text-xs"
-                style={{ color: 'var(--accent)' }}
-              >
-                View on Arc Explorer <ExternalLink size={12} />
-              </a>
+              <ExplorerLinks hash={hash} chainId={CHAIN_ID} variant="text" className="justify-center mt-2" />
             )}
             <button
               onClick={() => { onSuccess(); onClose(); reset() }}
@@ -454,15 +436,7 @@ function SendModal({
               The transaction reverted onchain. Your funds were not sent.
             </p>
             {hash && (
-              <a
-                href={buildTxExplorerUrl(CHAIN_ID, hash)}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="inline-flex items-center gap-1 mt-1 mb-3 text-xs"
-                style={{ color: 'var(--accent)' }}
-              >
-                View on Arc Explorer <ExternalLink size={12} />
-              </a>
+              <ExplorerLinks hash={hash} chainId={CHAIN_ID} variant="text" className="justify-center mt-1 mb-3" />
             )}
             <div className="flex gap-2 mt-2">
               <button

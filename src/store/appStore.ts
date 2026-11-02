@@ -360,6 +360,12 @@ if (typeof window !== 'undefined' && typeof window.addEventListener === 'functio
 export const appStore = {
   getState: () => globalState,
 
+  /** Calls `fn` after every change to the store. Returns the unsubscribe function. */
+  subscribe(fn: () => void): () => void {
+    listeners.add(fn)
+    return () => { listeners.delete(fn) }
+  },
+
   /** The wallet whose private data is loaded right now (lowercase), or null when nobody is connected. */
   getActiveWallet: (): string | null => activeWallet,
 

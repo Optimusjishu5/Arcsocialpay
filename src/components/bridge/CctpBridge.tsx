@@ -16,6 +16,7 @@ import { ARC_CHAIN_ID } from '../../chains'
 import { fieldClass, fieldLabel, fieldStyle } from '../pay/ShareLinkBox'
 import { KitChainPicker } from './KitChainPicker'
 import { parseUsdc } from '@/onchain-money'
+import { TxReceipt } from '../ui/TxReceipt'
 
 type Kit = AppKit
 type BridgeResult = Awaited<ReturnType<Kit['bridge']>>
@@ -277,7 +278,16 @@ export function CctpBridge() {
             )
           })}
           {succeeded && (
-            <p className="text-sm" style={{ color: 'var(--success)' }}>Done. The source transaction is confirmed and USDC arrived on {to}.</p>
+            <div className="space-y-2">
+              <p className="text-sm font-semibold" style={{ color: 'var(--success)' }}>Bridge successful. The source transaction is confirmed and USDC arrived on {to}.</p>
+              {(['burn', 'mint'] as const).map((name) => {
+                const st = result?.steps.find((x) => x.name === name)
+                const def = name === 'burn' ? fromDef : toDef
+                return st?.txHash ? (
+                  <TxReceipt key={name} hash={st.txHash} chainId={def?.chainId} label={name === 'burn' ? `Burn on ${from}` : `Mint on ${to}`} explorerUrl={st.explorerUrl} />
+                ) : null
+              })}
+            </div>
           )}
         </div>
       )}

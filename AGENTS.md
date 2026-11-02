@@ -59,3 +59,19 @@ The sandbox preview runs the optimized build (`bunx next start -H 0.0.0.0 -p 517
 - Pay > Batch: two-step flow (add recipients, then review and confirm). Components: `src/components/pay/BatchForm.tsx`, `BatchRowItem.tsx`, `BatchReview.tsx`.
 - Social sync (`src/hooks/usePersistentSocial.ts`, `src/utils/socialSync.ts`): a post counts as saved only after the server confirms it; fixes fresh posts being dropped by a poll that started before the save.
 - Known issue: `bun run hardhat:test` fails because Hardhat tries to compile `contracts/test/*.t.sol` (needs forge-std). Foundry tests (`forge test`) are the working suite.
+
+## Explorer integration (Arc Explorer + Arc RPC)
+
+- The only explorer is Arc Explorer (`explorer.arc.io`, Blockscout). Arc Etherscan was removed on purpose: no data source, no links, no env vars.
+- Links: `src/lib/arcExplorers.ts` builds tx/address/block links for `explorer.arc.io`, only for well-formed hashes. UI: `components/ui/ExplorerLinks.tsx` (unconfirmed hashes are checked on the Arc node first), `TxVerification.tsx`, `TxReceipt.tsx`.
+- History: `lib/explorerHistory.ts` streams the three Blockscout feeds through `app/api/explorer` (needs `BLOCKSCOUT_API_KEY`: the public host answers servers with a Cloudflare challenge, and the browser cannot call it either). Without the key the route answers `not_configured` and the app reads the Arc node instead (slower, USDC/EURC/cirBTC plus tokens the wallet holds).
+- `useOnchainActivity`: explorer records are applied in batches (first one at once, then at most every 250 ms); the node scan runs every 2 s for new blocks; the explorer is asked for anything new every 8 s and 3 s after a new transaction.
+- Verification: `app/api/tx?hash=` (`src/server/arcRpc.ts`) checks receipt + transaction + logs on the Arc node and decodes SocialPay events; the browser calls the same code directly on a static host. `app/api/tx-history` POST replaces client-claimed status/block/time with the node's.
+- Contract events: `app/api/socialpay/events` reads the Arc node in 8000-block windows and re-reads each event from its receipt. Contract creation block: 24,774,515.
+
+## Swap and bridge detection (activity)
+
+- Bridge out of Arc: a payment whose receipt holds a CCTP `DepositForBurn` (TokenMessengerV2 `0x28b5…cf5d`) with burn <= amount sent becomes a Bridge (`src/lib/bridgeDetect.ts`, applied in `addPaymentNotes`). Explorers list these as plain sends to a bridge contract, so both the explorer path and the node scan run the receipt check once per transaction (verdicts kept in localStorage `socialpay:bridge-checks:v1`).
+- Bridge in: tokens minted to the wallet (from 0x0) with nothing sent. Bridges through Across/Relay/LI.FI are not recognised from chain data (no shared event); they show only where the app recorded them.
+- Swaps: needs both legs visible. The node scan watches USDC, EURC, cirBTC plus tokens the wallet holds or held (`src/lib/scanTokens.ts`); the Arc node cannot filter logs without a token address (topic-only queries fail), so swaps into tokens the wallet never held need an explorer key (`BLOCKSCOUT_API_KEY` / `ETHERSCAN_API_KEY`).
+- `SCAN_VERSION` in `src/lib/activityCache.ts` is 4: bumping it makes every wallet re-read its node history once.

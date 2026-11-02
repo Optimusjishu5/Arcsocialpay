@@ -1,13 +1,12 @@
 'use client'
 
 // ── ArcSocialPay contract hook (Arc Mainnet) ────────────────────────────────
-// One-shot machine: requestPay / requestTip → auto-approve (if needed) →
-// contract call → receipt. Mirrors useSendUsdc conventions (hash + receipt
+// One-shot machine: requestPay / requestTip → auto-approve (if needed, up to the
+// limit chosen in Settings so later payments need no approval) → contract call → receipt. Mirrors useSendUsdc conventions (hash + receipt
 // gating, explorer URL, Error-shaped error for parseOnchainError).
 //
-// When NEXT_PUBLIC_SOCIAL_PAY_ADDRESS is unset, `isConfigured` is false and
-// request* immediately reports an error — callers keep their existing direct
-// USDC-transfer path as fallback and never touch this machine.
+// The contract is the deployed ArcSocialPay unless NEXT_PUBLIC_SOCIAL_PAY_ADDRESS
+// points elsewhere; `isConfigured` is false only if no valid address exists.
 
 import { useEffect, useState } from 'react'
 import { useAccount, useReadContract, useWriteContract, useWaitForTransactionReceipt } from 'wagmi'
@@ -16,6 +15,8 @@ import { ARC_CHAIN_ID, USDC_ADDRESS } from './useArcWallet'
 import { SOCIAL_PAY_ABI, SOCIAL_PAY_ADDRESS, isSocialPayConfigured } from '@/contracts/arcSocialPay'
 import { parseAmount } from '@/onchain-money'
 import { buildTxExplorerUrl } from '@/onchain-facts'
+import { useSettings } from './useSettings'
+import { approvalAmount, limitToRaw } from '../utils/approval'
 
 export type SocialPayStatus =
   | 'idle'
@@ -46,7 +47,7 @@ export function useSocialPay() {
   const [errorMsg, setErrorMsg] = useState<string | null>(null)
 
   // Allowance of the connected wallet to the contract (exact bigint).
-  const { data: allowanceData, isLoading: allowanceLoading } = useReadContract({
+  const { data: allowanceData, isLoading: allowanceLoading, refetch: refetchAllowance } = useReadContract({
     address: USDC_ADDRESS,
     abi: erc20Abi,
     functionName: 'allowance',
@@ -55,6 +56,7 @@ export function useSocialPay() {
     query: { enabled: configured && !!connectedAddress },
   })
   const allowance: bigint = (allowanceData ?? 0n) as bigint
+  const { allowanceLimit } = useSettings()
 
   const approveTx = useWriteContract()
   const actionTx = useWriteContract()
@@ -121,31 +123,43 @@ export function useSocialPay() {
     actionTx.reset()
   }
 
-  // Step 1: allowance known → send action directly, else approve first.
+  // Step 1: read the allowance fresh from the chain (a cached value may be from before the last payment),
+  // then send the action directly, or approve first.
   useEffect(() => {
     if (!intent || status !== 'checking') return
-    if (allowanceLoading) return
-    if (allowance >= intent.raw) {
-      setStatus('sending')
-      actionTx.writeContract({
-        address: contract,
-        abi: SOCIAL_PAY_ABI,
-        functionName: intent.kind === 'pay' ? 'pay' : 'tip',
-        args: [intent.to, intent.raw, intent.text],
-        chainId: ARC_CHAIN_ID,
-      })
-    } else {
-      setStatus('approving')
-      approveTx.writeContract({
-        address: USDC_ADDRESS,
-        abi: erc20Abi,
-        functionName: 'approve',
-        args: [contract, intent.raw],
-        chainId: ARC_CHAIN_ID,
-      })
-    }
+    let cancelled = false
+    void (async () => {
+      let current = allowance
+      try {
+        current = ((await refetchAllowance()).data ?? 0n) as bigint
+      } catch {
+        // keep the last known value; the contract call itself reverts if it is too low
+      }
+      if (cancelled) return
+      if (current >= intent.raw) {
+        setStatus('sending')
+        actionTx.writeContract({
+          address: contract,
+          abi: SOCIAL_PAY_ABI,
+          functionName: intent.kind === 'pay' ? 'pay' : 'tip',
+          args: [intent.to, intent.raw, intent.text],
+          chainId: ARC_CHAIN_ID,
+        })
+      } else {
+        setStatus('approving')
+        approveTx.writeContract({
+          address: USDC_ADDRESS,
+          abi: erc20Abi,
+          functionName: 'approve',
+          // The limit from Settings, or just this payment when it is larger or the limit is "exact".
+          args: [contract, approvalAmount(intent.raw, limitToRaw(allowanceLimit))],
+          chainId: ARC_CHAIN_ID,
+        })
+      }
+    })()
+    return () => { cancelled = true }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [intent, status, allowanceLoading, allowance])
+  }, [intent, status])
 
   // Step 2a: approve confirmed on-chain → send the action.
   useEffect(() => {
@@ -186,6 +200,7 @@ export function useSocialPay() {
     if (actionTx.data && status === 'sending') setStatus('confirming')
     if (actionReceipt?.status === 'success') {
       setStatus('done')
+      void refetchAllowance()
     } else if (actionReceipt?.status === 'reverted' || actionReceiptError) {
       fail('Transaction failed onchain (reverted). Your payment was not sent.')
     } else if (actionTx.error) {

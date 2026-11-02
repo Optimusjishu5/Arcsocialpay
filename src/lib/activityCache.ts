@@ -18,7 +18,8 @@ const DB_NAME = 'socialpay-activity'
 const TX_STORE = 'tx'
 const SCAN_STORE = 'scan'
 /** Bump to force every wallet to be scanned again from scratch. */
-const SCAN_VERSION = 3
+// 4: the node scan also watches tokens the wallet holds, so older windows are read again once.
+const SCAN_VERSION = 4
 
 const lower = (s: string) => s.toLowerCase()
 

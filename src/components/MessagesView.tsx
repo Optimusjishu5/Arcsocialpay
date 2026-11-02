@@ -19,8 +19,8 @@ import { Button } from './ui/Button'
 import { Modal } from './ui/Modal'
 import { TxSpinner } from './ui/TxStatusBadge'
 import { formatAddress, formatChatTime, parseOnchainError, ZERO_ADDRESS, AMOUNT_REGEX, isSameAddress } from '../utils/format'
-import { buildTxExplorerUrl } from '@/onchain-facts'
 import type { Message, Conversation, PaymentMessage } from '../types/index'
+import { ExplorerLinks } from './ui/ExplorerLinks'
 
 function getBlockedRecipientReason(recipient: string, myAddress: string): string | null {
   const lower = recipient.toLowerCase()
@@ -458,7 +458,6 @@ function MessageBubble({ msg, isMine, allMessages, onReply, onDelete }: {
 
 function PaymentBubble({ paymentTx, isMine }: { paymentTx: PaymentMessage; isMine: boolean }) {
   const statusColor = paymentTx.status === 'confirmed' ? 'var(--success)' : paymentTx.status === 'failed' ? 'var(--danger)' : '#a16207'
-  const explorerUrl = buildTxExplorerUrl(paymentTx.chainId || ARC_CHAIN_ID, paymentTx.txHash)
 
   return (
     <div className="rounded-2xl overflow-hidden min-w-[200px]"
@@ -481,10 +480,7 @@ function PaymentBubble({ paymentTx, isMine }: { paymentTx: PaymentMessage; isMin
         <span className="text-xs px-2 py-0.5 rounded-full font-medium" style={{ color: statusColor, background: `${statusColor}18` }}>
           {paymentTx.status}
         </span>
-        <a href={explorerUrl} target="_blank" rel="noopener noreferrer"
-          className="text-xs font-medium" style={{ color: 'var(--accent)' }}>
-          View tx
-        </a>
+        <ExplorerLinks hash={paymentTx.txHash} chainId={paymentTx.chainId || ARC_CHAIN_ID} variant="text" className="justify-end" />
       </div>
     </div>
   )
@@ -501,7 +497,7 @@ function InChatPayModal({ open, onClose, convId, myAddress, recipient }: {
 }) {
   const { display: balanceDisplay, raw: balanceRaw, refetch } = useUsdcBalance(myAddress as `0x${string}`)
   const { send, hash, isPending, isConfirming, isError, error, reset } = useSendUsdc()
-  // ArcSocialPay contract path — active once NEXT_PUBLIC_SOCIAL_PAY_ADDRESS is set.
+  // ArcSocialPay contract path — always active (the deployed address is the default).
   const sp = useSocialPay()
   const useContract = sp.isConfigured
   const activeHash = useContract ? sp.actionHash : hash

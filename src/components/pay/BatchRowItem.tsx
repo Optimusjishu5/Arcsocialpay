@@ -2,14 +2,14 @@
 
 import { useState } from 'react'
 import { isAddress } from 'viem'
-import { Check, ClipboardPaste, ExternalLink, Loader2, Trash2, TriangleAlert } from 'lucide-react'
+import { Check, ClipboardPaste, Loader2, Trash2, TriangleAlert } from 'lucide-react'
 import { toast } from 'sonner'
 import { Avatar } from '../ui/Avatar'
 import { cleanAmountInput } from '../swap/SwapPanel'
 import { ARC_CHAIN_ID } from '../../hooks/useArcWallet'
-import { buildTxExplorerUrl } from '@/onchain-facts'
 import { formatAddress } from '../../utils/format'
 import type { BatchRow } from '../../utils/batch'
+import { ExplorerLinks } from '../ui/ExplorerLinks'
 
 interface Props {
   index: number
@@ -146,10 +146,7 @@ export function BatchRowItem({ index, row, error, disabled, autoFocus, onChange,
           {sent && `Sent to ${formatAddress(row.address)}`}
           {row.status === 'failed' && (row.error ?? 'Failed')}
           {row.hash && (
-            <a href={buildTxExplorerUrl(ARC_CHAIN_ID, row.hash)} target="_blank" rel="noopener noreferrer"
-              className="inline-flex items-center gap-1 font-semibold" style={{ color: 'var(--tone-text)' }}>
-              <ExternalLink size={11} /> View
-            </a>
+            <ExplorerLinks hash={row.hash} chainId={ARC_CHAIN_ID} variant="text" />
           )}
         </p>
       )}

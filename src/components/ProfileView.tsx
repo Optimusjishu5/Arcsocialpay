@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import {
-  Camera, Copy, ExternalLink, UserPlus, UserMinus, MessageCircle, ArrowUpRight, ArrowDownLeft,
+  Camera, Copy, UserPlus, UserMinus, MessageCircle, ArrowUpRight, ArrowDownLeft,
   Pencil, FileText, Wallet, Users, Heart, Activity, BadgeCheck,
 } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
@@ -10,7 +10,7 @@ import { useArcAccount, useUsdcBalance, ARC_CHAIN_ID } from '../hooks/useArcWall
 import { appStore, useAppStore, filterTxHistoryForAddress, isSameAddress } from '../store/appStore'
 import { Avatar } from './ui/Avatar'
 import { PhotoFrame } from './profile/PhotoFrame'
-import { describeTx, txUrl } from '../utils/txPresentation'
+import { describeTx } from '../utils/txPresentation'
 import { Button } from './ui/Button'
 import { TxStatusBadge } from './ui/TxStatusBadge'
 import { EditProfileModal } from './profile/EditProfileModal'
@@ -18,8 +18,8 @@ import { GradientIcon, TONES, toneVars, type Tone } from './dashboard/ui'
 import { formatAddress, formatTimestamp, getAvatarColor } from '../utils/format'
 import { copyText } from '../utils/copy'
 import { PROFILE_ACCENTS } from '../lib/chatAuth'
-import { buildAddressExplorerUrl, buildTxExplorerUrl } from '@/onchain-facts'
 import type { NavView } from '../types/index'
+import { AddressExplorerLinks, ExplorerLinks } from './ui/ExplorerLinks'
 
 interface Props {
   viewAddress?: string // if undefined: show own profile
@@ -139,16 +139,7 @@ export function ProfileView({ viewAddress, onNavigate }: Props) {
               {formatAddress(targetAddress)}
               <Copy size={11} />
             </button>
-            <a
-              href={buildAddressExplorerUrl(ARC_CHAIN_ID, targetAddress)}
-              target="_blank"
-              rel="noopener noreferrer"
-              aria-label="View on explorer"
-              className="inline-flex items-center gap-1 text-xs hover:opacity-80"
-              style={{ color: 'var(--muted)' }}
-            >
-              Explorer <ExternalLink size={10} />
-            </a>
+            <AddressExplorerLinks address={targetAddress} variant="text" />
           </div>
 
           <div className="flex items-center justify-center gap-2 mt-4">
@@ -256,9 +247,7 @@ export function ProfileView({ viewAddress, onNavigate }: Props) {
                           {v.sign}{v.amountText}
                         </span>
                       )}
-                      <a href={txUrl(tx)} target="_blank" rel="noopener noreferrer" aria-label="View on explorer" style={{ color: 'var(--muted)' }}>
-                        <ExternalLink size={11} />
-                      </a>
+                      <ExplorerLinks hash={tx.txHash} chainId={tx.chainId} trusted={tx.blockNumber !== undefined && tx.status !== 'pending'} variant="icon" />
                     </div>
                   </div>
                 )

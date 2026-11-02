@@ -1,7 +1,6 @@
 'use client'
 
 import { useMemo, useState } from 'react'
-import { AnimatePresence, motion } from 'framer-motion'
 import { Activity, RefreshCw, Wallet } from 'lucide-react'
 import { useOnchainStatus } from '../../hooks/useOnchainActivity'
 import { ActivityRow } from '../activity/ActivityRow'
@@ -40,7 +39,7 @@ export function RecentActivity({ entries, onViewAll, onSend }: Props) {
   const sub = syncing
     ? `Reading your history from ${chain.source === 'explorer' ? 'the Arc explorer' : 'Arc'}...${txCount > 0 ? ` ${total} so far` : ''}`
     : txCount === 0 ? 'Arc Mainnet'
-    : partial ? `${total} found so far. Older history is still loading from Arc nodes.`
+    : partial ? `${total} live from Arc. Last ${Math.max(1, chain.daysCovered)} ${chain.daysCovered === 1 ? 'day' : 'days'} are complete, older history keeps loading.`
     : `${total} on Arc, same as the explorer`
 
   return (
@@ -113,13 +112,11 @@ export function RecentActivity({ entries, onViewAll, onSend }: Props) {
         )
       ) : (
         <div className="max-h-[30rem] overflow-y-auto overscroll-contain pr-0.5" role="list" aria-label="Recent activity">
-          <AnimatePresence initial={false} mode="popLayout">
-            {recent.map((e) => (
-              <motion.div key={e.id} layout="position" initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} transition={{ duration: 0.18 }}>
-                <ActivityRow entry={e} />
-              </motion.div>
-            ))}
-          </AnimatePresence>
+          {recent.map((e) => (
+            <div key={e.id} className="activity-in" role="listitem">
+              <ActivityRow entry={e} />
+            </div>
+          ))}
           {filtered.length > recent.length && (
             <button onClick={onViewAll}
               className="w-full h-11 mt-1 rounded-2xl text-sm font-semibold transition-colors hover:bg-[var(--surface-muted)]"

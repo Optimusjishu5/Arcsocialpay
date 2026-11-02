@@ -16,6 +16,7 @@ import { getChainUsdc, toViemBridgeChain, txUrl, useBridgeChains, type ChainUsdc
 import { ARC_CHAIN_ID } from '../../chains'
 import { fieldClass, fieldLabel, fieldStyle } from '../pay/ShareLinkBox'
 import { ChainPicker } from './ChainPicker'
+import { TxReceipt } from '../ui/TxReceipt'
 
 const QUOTE_MAX_AGE_MS = 60_000
 const WARN_ABOVE_USD = 100
@@ -261,6 +262,9 @@ export function LifiBridge() {
             <Line key={h.hash} state="done" label={`${h.label} confirmed`}>
               {h.url && <a href={h.url} target="_blank" rel="noopener noreferrer" aria-label="View on explorer" style={{ color: 'var(--tone-text)' }}><ExternalLink size={13} /></a>}
             </Line>
+          ))}
+          {delivery === 'done' && sent.map((h) => (
+            <TxReceipt key={`r-${h.hash}`} hash={h.hash} chainId={fromChain?.id} label={`${h.label} (${fromChain?.name ?? 'source chain'})`} explorerUrl={h.url} />
           ))}
           {delivery && (
             <Line state={delivery === 'done' ? 'done' : delivery === 'failed' ? 'bad' : 'wait'}

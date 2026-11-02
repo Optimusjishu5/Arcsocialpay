@@ -1,9 +1,10 @@
 'use client'
 
-// App settings stored locally in this browser (notification rules).
+// App settings stored locally in this browser (notification rules, payment approval limit).
 
 import { useCallback, useMemo, useSyncExternalStore } from 'react'
 import type { NotifType, Notification } from '../types/index'
+import { DEFAULT_LIMIT, parseLimit } from '../utils/approval'
 
 const STORAGE_KEY = 'socialpay:settings:v1'
 const listeners = new Set<() => void>()
@@ -41,27 +42,52 @@ function subscribe(cb: () => void) {
   }
 }
 
-function parseRules(raw: string): NotifRules {
+interface Stored { rules?: Partial<NotifRules>; allowanceLimit?: string }
+
+function parseStored(raw: string): Stored {
   try {
-    const parsed = raw ? (JSON.parse(raw) as { rules?: Partial<NotifRules> }) : {}
-    return { ...DEFAULT_RULES, ...(parsed.rules ?? {}) }
+    return raw ? (JSON.parse(raw) as Stored) : {}
   } catch {
-    return DEFAULT_RULES
+    return {}
   }
+}
+
+function parseRules(raw: string): NotifRules {
+  return { ...DEFAULT_RULES, ...(parseStored(raw).rules ?? {}) }
+}
+
+/** The saved approval limit ("exact" or a USDC amount); falls back to the default when missing or invalid. */
+function parseAllowance(raw: string): string {
+  const v = parseStored(raw).allowanceLimit
+  const p = typeof v === 'string' ? parseLimit(v) : null
+  return p?.ok ? p.value : DEFAULT_LIMIT
+}
+
+function save(patch: Stored) {
+  try {
+    const cur = parseStored(readRaw())
+    window.localStorage.setItem(STORAGE_KEY, JSON.stringify({ ...cur, ...patch }))
+  } catch {
+    // storage unavailable: setting just won't persist
+  }
+  listeners.forEach((l) => l())
 }
 
 export function useSettings() {
   const raw = useSyncExternalStore(subscribe, readRaw, () => '')
   const rules = useMemo(() => parseRules(raw), [raw])
+  const allowanceLimit = useMemo(() => parseAllowance(raw), [raw])
 
   const setRule = useCallback((type: NotifType, enabled: boolean) => {
-    const next = { ...parseRules(readRaw()), [type]: enabled }
-    try {
-      window.localStorage.setItem(STORAGE_KEY, JSON.stringify({ rules: next }))
-    } catch {
-      // storage unavailable: setting just won't persist
-    }
-    listeners.forEach((l) => l())
+    save({ rules: { ...parseRules(readRaw()), [type]: enabled } })
+  }, [])
+
+  /** Saves how much USDC to approve the contract for at once. Returns false when the value is not valid. */
+  const setAllowanceLimit = useCallback((value: string): boolean => {
+    const p = parseLimit(value)
+    if (!p.ok) return false
+    save({ allowanceLimit: p.value })
+    return true
   }, [])
 
   /** Hide notification types the user turned off. */
@@ -70,5 +96,5 @@ export function useSettings() {
     [rules],
   )
 
-  return { rules, setRule, filterNotifications }
+  return { rules, setRule, filterNotifications, allowanceLimit, setAllowanceLimit }
 }

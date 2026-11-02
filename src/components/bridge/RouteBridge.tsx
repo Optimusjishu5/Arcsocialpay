@@ -19,6 +19,7 @@ import { parseUsdc } from '@/onchain-money'
 import { Zap, Rocket, Layers } from 'lucide-react'
 import { GradientIcon, type Tone } from '../dashboard/ui'
 import type { LucideIcon } from 'lucide-react'
+import { TxReceipt } from '../ui/TxReceipt'
 
 const PROVIDER_STYLE: Record<string, { icon: LucideIcon; tone: Tone }> = {
   Across: { icon: Zap, tone: 'teal' },
@@ -283,6 +284,9 @@ export function RouteBridge() {
             <Line key={h.hash} state="done" label={`${h.label} confirmed`}>
               <a href={h.url} target="_blank" rel="noopener noreferrer" aria-label="View on explorer" style={{ color: 'var(--tone-text)' }}><ExternalLink size={13} /></a>
             </Line>
+          ))}
+          {delivery === 'done' && sentHashes.map((h) => (
+            <TxReceipt key={`r-${h.hash}`} hash={h.hash} chainId={fromDef?.chainId} label={`${h.label} (${from})`} explorerUrl={h.url} />
           ))}
           {delivery && (
             <Line state={delivery === 'done' ? 'done' : delivery === 'failed' ? 'bad' : 'wait'}

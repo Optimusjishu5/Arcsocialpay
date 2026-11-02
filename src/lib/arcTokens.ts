@@ -124,6 +124,7 @@ function merge(lifi: LifiToken[], kyber: KyberToken[]): ArcToken[] {
 let tokens: ArcToken[] = BUILTIN
 let loading = false
 let loaded = false
+let attempted = false
 const listeners = new Set<() => void>()
 const emit = () => listeners.forEach((l) => l())
 
@@ -156,8 +157,17 @@ async function loadTokens(): Promise<void> {
     }
   } finally {
     loading = false
+    attempted = true
     emit()
   }
+}
+
+/** The swappable token list outside React. Waits briefly for the first load; falls back to the built-in tokens. */
+export async function getArcTokenList(timeoutMs = 6_000): Promise<ArcToken[]> {
+  const started = Date.now()
+  void loadTokens()
+  while (!loaded && (loading || !attempted) && Date.now() - started < timeoutMs) await new Promise((r) => setTimeout(r, 150))
+  return tokens
 }
 
 const subscribe = (l: () => void) => {

@@ -1,12 +1,12 @@
 'use client'
 
-import { Check, CircleDashed, ExternalLink, Loader2, X } from 'lucide-react'
+import { Check, CircleDashed, Loader2, X } from 'lucide-react'
 import { Avatar } from '../ui/Avatar'
 import { ARC_CHAIN_ID } from '../../hooks/useArcWallet'
-import { buildTxExplorerUrl } from '@/onchain-facts'
 import { formatAddress, formatUsdcDisplay } from '../../utils/format'
 import { parseUsdc } from '@/onchain-money'
 import type { BatchRow } from '../../utils/batch'
+import { ExplorerLinks } from '../ui/ExplorerLinks'
 
 function rawOf(amount: string): bigint {
   try { return parseUsdc(amount.trim()) } catch { return 0n }
@@ -55,10 +55,7 @@ export function BatchReview({ rows, balance }: { rows: BatchRow[]; balance: bigi
               <div className="text-xs flex items-center gap-1.5 min-w-0" style={{ color: r.status === 'failed' ? 'var(--danger)' : 'var(--muted)' }} aria-live="polite">
                 <span className="truncate">{r.status === 'failed' && r.error ? r.error : `${i + 1}. ${STATUS_TEXT[r.status]}`}</span>
                 {r.hash && (
-                  <a href={buildTxExplorerUrl(ARC_CHAIN_ID, r.hash)} target="_blank" rel="noopener noreferrer"
-                    aria-label="View transaction" className="inline-flex flex-shrink-0" style={{ color: 'var(--tone-text)' }}>
-                    <ExternalLink size={11} />
-                  </a>
+                  <ExplorerLinks hash={r.hash} chainId={ARC_CHAIN_ID} variant="text" className="flex-shrink-0" />
                 )}
               </div>
             </div>

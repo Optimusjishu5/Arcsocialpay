@@ -2,10 +2,8 @@
  * ArcSocialPay contract binding (Arc Mainnet).
  *
  * Source: contracts/ArcSocialPay.sol (single-file, no imports — Remix-ready).
- * The live address is injected after manual deployment via:
- *   NEXT_PUBLIC_SOCIAL_PAY_ADDRESS=0x...
- * Until then `isSocialPayConfigured()` is false and every caller falls back
- * to plain USDC transfers (existing behavior, untouched).
+ * Payments use the deployed contract at SOCIAL_PAY_DEPLOYED_ADDRESS by default; set
+ * NEXT_PUBLIC_SOCIAL_PAY_ADDRESS=0x... only to point at a different deployment.
  */
 
 export const SOCIAL_PAY_ABI = [
@@ -194,21 +192,22 @@ export const SOCIAL_PAY_ABI = [
   },
 ] as const
 
-/** Live ArcSocialPay address, set after manual Remix deployment. Empty = not deployed. */
-export const SOCIAL_PAY_ADDRESS: string =
+/** The ArcSocialPay deployment on Arc Mainnet (owner-verified onchain, see README). */
+export const SOCIAL_PAY_DEPLOYED_ADDRESS = '0x3b61FC789342B02Ae9DA3Bcece910AFaAd40bf54' as const
+
+const ENV_ADDRESS =
   (typeof process !== 'undefined' ? process.env.NEXT_PUBLIC_SOCIAL_PAY_ADDRESS : undefined)?.trim() ?? ''
 
-/** True only when a valid 0x address is configured — otherwise callers use direct USDC transfers. */
+/**
+ * The ArcSocialPay contract every payment, tip and in-chat pay goes through. It is the deployment
+ * above unless NEXT_PUBLIC_SOCIAL_PAY_ADDRESS holds a different, valid address.
+ */
+export const SOCIAL_PAY_ADDRESS: string = /^0x[0-9a-fA-F]{40}$/.test(ENV_ADDRESS) ? ENV_ADDRESS : SOCIAL_PAY_DEPLOYED_ADDRESS
+
+/** True when payments route through the contract (always: the deployed address is the default). */
 export function isSocialPayConfigured(): boolean {
   return /^0x[0-9a-fA-F]{40}$/.test(SOCIAL_PAY_ADDRESS)
 }
-
-/**
- * The ArcSocialPay deployment on Arc Mainnet (owner-verified onchain, see README).
- * Shown in Settings even before NEXT_PUBLIC_SOCIAL_PAY_ADDRESS is set; payments only
- * route through it once that variable is set.
- */
-export const SOCIAL_PAY_DEPLOYED_ADDRESS = '0x3b61FC789342B02Ae9DA3Bcece910AFaAd40bf54' as const
 
 /** The address Settings shows: the configured one, else the known deployment. */
 export function socialPayDisplayAddress(): string {

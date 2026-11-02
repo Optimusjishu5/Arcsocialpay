@@ -31,14 +31,29 @@ const num = (v: unknown): number => { const n = Number(v); return Number.isFinit
 
 // ── Fetching ────────────────────────────────────────────────────────────────
 
-export interface Page { items: Json[]; next: Record<string, string> | null }
+export interface Page {
+  items: Json[]
+  next: Record<string, string> | null
+  /** Set when several explorers were read together: every block above this one is complete in all of them. */
+  frontier?: number
+}
 
 /** Where a page comes from. Throws when the explorer can't be reached. */
 export type PageFetcher = (feed: Feed, address: string, cursor: Record<string, string> | null) => Promise<Page>
 
+export type SourceFailure = 'rate_limited' | 'not_configured' | 'unavailable'
+
+/** An explorer could not answer. `code` says why, so the page can tell the user. */
+export class SourceError extends Error {
+  constructor(message: string, readonly code: SourceFailure, readonly retryAfter?: number) {
+    super(message)
+    this.name = 'SourceError'
+  }
+}
+
 function toPage(json: unknown): Page {
   const j = obj(json)
-  if (!Array.isArray(j.items)) throw new Error('Unexpected explorer answer')
+  if (!Array.isArray(j.items)) throw new SourceError('Unexpected explorer answer', 'unavailable')
   const npp = obj(j.next_page_params)
   const next: Record<string, string> = {}
   for (const [k, v] of Object.entries(npp)) if (v !== null && v !== undefined) next[k] = String(v)
@@ -47,19 +62,28 @@ function toPage(json: unknown): Page {
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
 
+/** Reads JSON, waiting out rate limits (the answer's own Retry-After when it gives one). */
 async function getJson(url: string, init?: RequestInit): Promise<unknown> {
   for (let attempt = 0; attempt < 6; attempt++) {
     const res = await fetch(url, init)
-    if (res.status === 429) { await sleep(1_000 * (attempt + 1)); continue }
-    if (!res.ok) throw new Error(`Explorer answered ${res.status}`)
+    if (res.status === 429) {
+      const asked = Number(res.headers.get('retry-after'))
+      await sleep(Math.min(15_000, (Number.isFinite(asked) && asked > 0 ? asked : attempt + 1) * 1_000))
+      continue
+    }
     const ct = res.headers.get('content-type') ?? ''
-    if (!ct.includes('json')) throw new Error('Explorer answered with a page, not data') // e.g. a bot check
+    if (!res.ok) {
+      const body = ct.includes('json') ? obj(await res.json().catch(() => null)) : {}
+      if (str(body.code) === 'not_configured') throw new SourceError('This explorer is not set up', 'not_configured')
+      throw new SourceError(`Explorer answered ${res.status}`, 'unavailable')
+    }
+    if (!ct.includes('json')) throw new SourceError('Explorer answered with a page, not data', 'unavailable') // e.g. a bot check
     return res.json()
   }
-  throw new Error('Explorer is rate limited')
+  throw new SourceError('Explorer is rate limited', 'rate_limited')
 }
 
-/** This app's own server route (keeps the explorer key private). Missing on static hosts. */
+/** This app's own server route to the Arc Explorer (keeps its key private). Missing on static hosts. */
 const viaServer: PageFetcher = async (feed, address, cursor) => {
   const qs = new URLSearchParams({ feed, address, ...(cursor ?? {}) })
   return toPage(await getJson(`/api/explorer?${qs}`))
@@ -68,14 +92,14 @@ const viaServer: PageFetcher = async (feed, address, cursor) => {
 /** Direct call with a key that ships in the page, for hosts that have no server routes. */
 const viaPublicKey: PageFetcher = async (feed, address, cursor) => {
   const key = (typeof process !== 'undefined' ? process.env.NEXT_PUBLIC_BLOCKSCOUT_API_KEY : undefined)?.trim()
-  if (!key) throw new Error('No explorer key')
+  if (!key) throw new SourceError('No explorer key', 'unavailable')
   const qs = new URLSearchParams(cursor ?? {})
   const url = `https://api.blockscout.com/${ARC_CHAIN_ID}/api/v2/addresses/${address}/${feed}?${qs}`
   return toPage(await getJson(url, { headers: { authorization: `Bearer ${key}` } }))
 }
 
 /** Tries each way in turn and sticks with the first that works. */
-export function makeFetcher(sources: readonly PageFetcher[] = [viaServer, viaPublicKey]): PageFetcher {
+export function firstWorking(sources: readonly PageFetcher[]): PageFetcher {
   let working: PageFetcher | null = null
   return async (feed, address, cursor) => {
     if (working) return working(feed, address, cursor)
@@ -89,6 +113,93 @@ export function makeFetcher(sources: readonly PageFetcher[] = [viaServer, viaPub
     }
     throw lastError instanceof Error ? lastError : new Error('Explorer unavailable')
   }
+}
+
+export interface NamedSource { id: string; label: string; fetch: PageFetcher }
+
+/** Arc Explorer (explorer.arc.io) is the only explorer the history is read from. */
+export const DEFAULT_SOURCES: readonly NamedSource[] = [
+  { id: 'arc', label: 'Arc Explorer', fetch: firstWorking([viaServer, viaPublicKey]) },
+]
+
+export type SourceState = 'idle' | 'ok' | 'done' | 'rate-limited' | 'not-configured' | 'unavailable'
+export interface SourceStatus { id: string; label: string; state: SourceState; detail?: string }
+export type CombinedFetcher = PageFetcher & { status: () => SourceStatus[] }
+
+/** A source that failed this way is tried again after this long (a missing key is not). */
+const RETRY_AFTER_MS = 60_000
+
+const lowestBlock = (items: Json[]): number => {
+  let low = Number.MAX_SAFE_INTEGER
+  for (const it of items) {
+    const b = num(it.block_number ?? it.block)
+    if (b > 0) low = Math.min(low, b)
+  }
+  return low === Number.MAX_SAFE_INTEGER ? 0 : low
+}
+
+/**
+ * Reads every source at once and hands back their rows together, so a transaction either explorer
+ * knows about is described, and one explorer being down, limited or not set up does not stop the other.
+ * Each source keeps its own place in the paging cursor (keys are prefixed with the source id), and a
+ * page is only called complete down to the block the slowest source has reached.
+ */
+export function combineSources(sources: readonly NamedSource[]): CombinedFetcher {
+  const status = new Map<string, SourceStatus>(sources.map((s) => [s.id, { id: s.id, label: s.label, state: 'idle' }]))
+  const retryAt = new Map<string, number>()
+  let lastError: unknown
+
+  const fetcher: PageFetcher = async (feed, address, cursor) => {
+    const now = Date.now()
+    const live = sources.filter((s) => (retryAt.get(s.id) ?? 0) <= now && !cursor?.[`${s.id}~done`])
+    const settled = await Promise.allSettled(live.map((s) => {
+      const own: Record<string, string> = {}
+      const prefix = `${s.id}~`
+      for (const [k, v] of Object.entries(cursor ?? {})) if (k.startsWith(prefix) && k !== `${s.id}~done`) own[k.slice(prefix.length)] = v
+      return s.fetch(feed, address, Object.keys(own).length ? own : null)
+    }))
+
+    const items: Json[] = []
+    const next: Record<string, string> = {}
+    let frontier = 0
+    let answered = 0
+    settled.forEach((r, i) => {
+      const s = live[i]
+      if (r.status === 'rejected') {
+        lastError = r.reason
+        const code = r.reason instanceof SourceError ? r.reason.code : 'unavailable'
+        retryAt.set(s.id, code === 'not_configured' ? Number.POSITIVE_INFINITY : Date.now() + RETRY_AFTER_MS)
+        status.set(s.id, {
+          id: s.id, label: s.label,
+          state: code === 'not_configured' ? 'not-configured' : code === 'rate_limited' ? 'rate-limited' : 'unavailable',
+          detail: r.reason instanceof Error ? r.reason.message : undefined,
+        })
+        return
+      }
+      answered++
+      retryAt.delete(s.id)
+      items.push(...r.value.items)
+      if (r.value.next) {
+        for (const [k, v] of Object.entries(r.value.next)) next[`${s.id}~${k}`] = v
+        frontier = Math.max(frontier, lowestBlock(r.value.items))
+        status.set(s.id, { id: s.id, label: s.label, state: 'ok' })
+      } else {
+        next[`${s.id}~done`] = '1'
+        status.set(s.id, { id: s.id, label: s.label, state: 'done' })
+      }
+    })
+    if (answered === 0) throw lastError instanceof Error ? lastError : new Error('Explorer unavailable')
+    for (const s of sources) if (cursor?.[`${s.id}~done`]) next[`${s.id}~done`] = '1'
+    // Sources that were already finished, or that are unavailable right now, no longer hold the history back.
+    const open = sources.some((s) => !next[`${s.id}~done`] && (retryAt.get(s.id) ?? 0) <= Date.now())
+    return { items, next: open ? next : null, frontier }
+  }
+  return Object.assign(fetcher, { status: () => sources.map((s) => status.get(s.id) as SourceStatus) })
+}
+
+/** The explorer the app reads: Arc Explorer. */
+export function makeFetcher(sources: readonly NamedSource[] = DEFAULT_SOURCES): CombinedFetcher {
+  return combineSources(sources)
 }
 
 // ── Reading ─────────────────────────────────────────────────────────────────
@@ -307,7 +418,8 @@ export async function streamExplorerHistory(me: string, o: StreamOptions): Promi
     for (const { f, page } of results) {
       items += page.items.length
       const low = readItems(s, f, page.items)
-      if (low) oldest.set(f, low)
+      if (page.frontier !== undefined) oldest.set(f, page.frontier)
+      else if (low) oldest.set(f, low)
       cursors.set(f, page.next)
       if (!page.next || page.items.length === 0) finished.add(f)
     }

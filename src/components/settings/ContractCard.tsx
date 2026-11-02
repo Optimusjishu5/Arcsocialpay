@@ -1,15 +1,15 @@
 'use client'
 
 import { useState } from 'react'
-import { Check, Copy, ExternalLink, FileCode2 } from 'lucide-react'
+import { Check, Copy, FileCode2 } from 'lucide-react'
 import { useReadContracts } from 'wagmi'
 import { ARC_CHAIN_ID } from '../../chains'
-import { buildAddressExplorerUrl } from '@/onchain-facts'
 import { SOCIAL_PAY_ABI, isSocialPayConfigured, socialPayDisplayAddress } from '../../contracts/arcSocialPay'
 import { GradientIcon } from '../dashboard/ui'
 import { copyText } from '../../utils/copy'
 import { formatAddress } from '../../utils/format'
 import { useArcAccount } from '../../hooks/useArcWallet'
+import { AddressExplorerLinks } from '../ui/ExplorerLinks'
 
 /** Highlighted card with this project's own contract: address, live status, copy and explorer. */
 export function ContractCard() {
@@ -81,14 +81,7 @@ export function ContractCard() {
         </button>
 
         <div className="flex flex-wrap items-center gap-2 text-xs">
-          <a
-            href={buildAddressExplorerUrl(ARC_CHAIN_ID, contract)}
-            target="_blank" rel="noopener noreferrer"
-            className="inline-flex items-center gap-1.5 h-9 px-3 rounded-full font-semibold"
-            style={{ background: 'var(--surface-muted)', border: '1px solid var(--border)', color: 'var(--accent)' }}
-          >
-            View on explorer <ExternalLink size={12} />
-          </a>
+          <AddressExplorerLinks address={contract} variant="text" />
           {isOwner && (
             <span className="inline-flex items-center h-9 px-3 rounded-full font-semibold" style={{ background: 'var(--success-bg)', color: 'var(--success)' }}>
               You are the owner
@@ -104,7 +97,7 @@ export function ContractCard() {
         <p className="text-[11px]" style={{ color: routing ? 'var(--success)' : 'var(--subtle)' }}>
           {routing
             ? 'Payments and tips in the app go through this contract.'
-            : 'Deployed and ready. Payments are still sent as direct USDC transfers until NEXT_PUBLIC_SOCIAL_PAY_ADDRESS is set.'}
+            : 'Deployed and ready, but not used for payments right now.'}
         </p>
       </div>
     </section>

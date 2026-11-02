@@ -175,3 +175,13 @@ body {
   border-color: color-mix(in srgb, var(--tone-to) 40%, var(--border-strong));
   color: var(--tone-text);
 }
+
+/* A new row in the activity lists fades in; rows already there do not move or redraw. */
+@keyframes activity-in {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: none; }
+}
+.activity-in { animation: activity-in 0.18s ease-out; }
+@media (prefers-reduced-motion: reduce) {
+  .activity-in { animation: none; }
+}

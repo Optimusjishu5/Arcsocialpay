@@ -5,6 +5,9 @@ import {
   listTxRecords,
   upsertTxRecord,
 } from '@/lib/turso'
+import { isTxHash } from '@/lib/arcExplorers'
+import { verifyTransaction } from '@/server/arcRpc'
+import { rateLimit, tooManyRequests } from '@/server/guard'
 
 export async function GET(req: Request) {
   if (!isTursoConfigured()) {
@@ -55,6 +58,25 @@ export async function POST(req: Request) {
     if (!body?.txHash) {
       return NextResponse.json({ error: 'txHash required' }, { status: 400 })
     }
+    const limited = rateLimit(req, 'tx-history', 120)
+    if (!limited.ok) return tooManyRequests(limited.retryAfter)
+
+    // A saved payment must be a real Arc transaction. What the Arc node says (outcome, block, time)
+    // replaces what the browser claimed; a payment the node does not know yet can only be saved as pending.
+    let { status, blockNumber, timestamp } = body
+    if ((body.chainId ?? 5042) === 5042) {
+      if (!isTxHash(body.txHash)) return NextResponse.json({ error: 'txHash is not a transaction hash' }, { status: 400 })
+      const onChain = await verifyTransaction(body.txHash).catch(() => null) // node unreachable: keep as sent
+      if (onChain && !onChain.found && status === 'confirmed') {
+        return NextResponse.json({ error: 'Transaction is not on Arc (yet), so it cannot be saved as settled' }, { status: 422 })
+      }
+      if (onChain?.found) {
+        if (!onChain.verified) return NextResponse.json({ error: 'Arc data for this transaction is inconsistent' }, { status: 422 })
+        status = onChain.status === 'success' ? 'confirmed' : 'failed'
+        blockNumber = onChain.blockNumber
+        timestamp = onChain.timestamp
+      }
+    }
     await upsertTxRecord({
       id: body.id ?? body.txHash,
       txHash: body.txHash,
@@ -63,10 +85,10 @@ export async function POST(req: Request) {
       amount: body.amount ?? '',
       fromAddress: body.fromAddress ?? '',
       toAddress: body.toAddress ?? '',
-      status: body.status ?? 'pending',
-      timestamp: body.timestamp ?? Date.now(),
+      status: status ?? 'pending',
+      timestamp: timestamp ?? Date.now(),
       note: body.note,
-      blockNumber: body.blockNumber,
+      blockNumber,
       kind: ['payment', 'swap', 'bridge', 'batch', 'request', 'split', 'schedule', 'other'].includes(body.kind ?? '') ? body.kind : undefined,
       summary: typeof body.summary === 'string' ? body.summary.slice(0, 200) : undefined,
       symbol: typeof body.symbol === 'string' ? body.symbol.slice(0, 12) : undefined,
