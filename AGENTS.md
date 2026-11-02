@@ -75,3 +75,9 @@ The sandbox preview runs the optimized build (`bunx next start -H 0.0.0.0 -p 517
 - Bridge in: tokens minted to the wallet (from 0x0) with nothing sent. Bridges through Across/Relay/LI.FI are not recognised from chain data (no shared event); they show only where the app recorded them.
 - Swaps: needs both legs visible. The node scan watches USDC, EURC, cirBTC plus tokens the wallet holds or held (`src/lib/scanTokens.ts`); the Arc node cannot filter logs without a token address (topic-only queries fail), so swaps into tokens the wallet never held need an explorer key (`BLOCKSCOUT_API_KEY` / `ETHERSCAN_API_KEY`).
 - `SCAN_VERSION` in `src/lib/activityCache.ts` is 4: bumping it makes every wallet re-read its node history once.
+
+## Vercel deployment (static + one function)
+
+- The Vercel copy is a static export (built in a temp folder with `app/api` removed, `output: 'export'`) plus `api/explorer.js`, a serverless function from `deploy/vercel/api/explorer.cjs` (copy it as `.js` into the upload folder: `.cjs` was not picked up by Vercel). Upload folder must be inside the project (`vercel_deploy` refuses other paths); icons are shrunk to stay under the 10 MB request limit.
+- The function reads `BLOCKSCOUT_API_KEY` from the Vercel project's environment variables (Settings > Environment Variables). Env vars apply only to deployments made after they are set, so redeploy after adding or changing it. Never put the key in the uploaded files.
+- Without the variable the function answers 503 `not_configured` and the app reads the Arc nodes.
