@@ -22,33 +22,32 @@ function Hero() {
   return (
     <section className="relative overflow-hidden">
       <div className="site-grid-bg pointer-events-none absolute inset-0" aria-hidden />
-      <div className="relative mx-auto grid max-w-6xl items-center gap-10 px-4 pb-16 pt-14 sm:px-6 sm:pb-24 sm:pt-20 lg:grid-cols-[1.1fr_0.9fr] lg:gap-12">
-        <div>
-          <div className="flex flex-wrap gap-2">
-            <Pill><img src="/chains/arc.svg" alt="" width={14} height={14} /> Built on Arc Mainnet</Pill>
-            <Pill><img src="/tokens/usdc.png" alt="" width={14} height={14} className="rounded-full" /> USDC-powered</Pill>
-          </div>
-          <h1 className="display mt-6 text-4xl font-bold leading-[1.05] site-ink text-balance sm:text-6xl">
-            Social Payments. One Seamless Experience.
-          </h1>
-          <p className="site-muted mt-5 max-w-xl text-lg leading-relaxed text-pretty">
-            SocialPay brings messaging, a social feed and native USDC payments into one app on Arc. Our mission: make sending money as easy and as personal as sending a message, without giving up control of your funds.
-          </p>
-          <div className="mt-8 flex flex-wrap gap-3">
-            <Link href={APP_URL} className="site-btn site-focus">Launch App <ArrowUpRight size={16} aria-hidden /></Link>
-            <Link href={DOCS_URL} className="site-btn-ghost site-focus"><BookOpen size={16} aria-hidden /> Documentation</Link>
-            <a href={GITHUB_URL} target="_blank" rel="noopener noreferrer" className="site-btn-ghost site-focus"><Github size={16} aria-hidden /> GitHub</a>
-            <a href={X_URL} target="_blank" rel="noopener noreferrer" className="site-btn-ghost site-focus"><XLogo size={14} /> Follow on X</a>
-          </div>
-          <p className="site-subtle mt-5 text-xs">Arc Mainnet moves real USDC. Start with a small amount.</p>
-        </div>
-        {/* The animated mark sits in the exact middle of its column, larger on desktop. The box reserves the
-            scaled size, because a transform does not change layout. */}
-        <div className="flex items-center justify-center lg:h-[380px]">
-          <div className="origin-center lg:scale-[1.45]">
+      {/* One centered column: the animated mark sits on the exact middle line of the page, with the
+          headline, text and buttons centered beneath it. */}
+      <div className="relative mx-auto flex max-w-4xl flex-col items-center px-4 pb-16 pt-10 text-center sm:px-6 sm:pb-24 sm:pt-14">
+        {/* The box reserves the scaled size, because a transform does not change layout. */}
+        <div className="flex h-[260px] w-full items-center justify-center sm:h-[300px]">
+          <div className="origin-center scale-100 sm:scale-[1.15]">
             <LandingHero />
           </div>
         </div>
+        <div className="mt-6 flex flex-wrap justify-center gap-2">
+          <Pill><img src="/chains/arc.svg" alt="" width={14} height={14} /> Built on Arc Mainnet</Pill>
+          <Pill><img src="/tokens/usdc.png" alt="" width={14} height={14} className="rounded-full" /> USDC-powered</Pill>
+        </div>
+        <h1 className="display mt-6 max-w-3xl text-4xl font-bold leading-[1.05] site-ink text-balance sm:text-6xl">
+          Social Payments. One Seamless Experience.
+        </h1>
+        <p className="site-muted mx-auto mt-5 max-w-2xl text-lg leading-relaxed text-pretty">
+          SocialPay brings messaging, a social feed and native USDC payments into one app on Arc. Our mission: make sending money as easy and as personal as sending a message, without giving up control of your funds.
+        </p>
+        <div className="mt-8 flex flex-wrap justify-center gap-3">
+          <Link href={APP_URL} className="site-btn site-focus">Launch App <ArrowUpRight size={16} aria-hidden /></Link>
+          <Link href={DOCS_URL} className="site-btn-ghost site-focus"><BookOpen size={16} aria-hidden /> Documentation</Link>
+          <a href={GITHUB_URL} target="_blank" rel="noopener noreferrer" className="site-btn-ghost site-focus"><Github size={16} aria-hidden /> GitHub</a>
+          <a href={X_URL} target="_blank" rel="noopener noreferrer" className="site-btn-ghost site-focus"><XLogo size={14} /> Follow on X</a>
+        </div>
+        <p className="site-subtle mt-5 text-xs">Arc Mainnet moves real USDC. Start with a small amount.</p>
       </div>
     </section>
   )
