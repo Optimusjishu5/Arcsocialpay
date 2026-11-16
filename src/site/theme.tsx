@@ -15,6 +15,10 @@ function subscribe(listener: () => void) {
   return () => { listeners.delete(listener) }
 }
 
+function getServerTheme(): Theme {
+  return 'dark'
+}
+
 function readTheme(): Theme {
   return document.documentElement.classList.contains('dark') ? 'dark' : 'light'
 }
@@ -32,7 +36,7 @@ function persist(theme: Theme) {
 
 export function useSiteTheme() {
   // Server and first client render agree on "dark"; the real value is read once the page is in the browser.
-  const theme = useSyncExternalStore(subscribe, readTheme, () => 'dark' as Theme)
+  const theme = useSyncExternalStore(subscribe, readTheme, getServerTheme)
 
   const apply = useCallback((next: Theme) => {
     document.documentElement.classList.toggle('dark', next === 'dark')

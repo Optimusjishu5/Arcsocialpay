@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { createPublicClient, erc20Abi, formatUnits, http, isAddress } from 'viem'
+import { createPublicClient, erc20Abi, formatUnits, http, isAddress, parseUnits } from 'viem'
 import { useAccount } from 'wagmi'
 import { appStore } from '../../store/appStore'
 import { ConnectKitButton } from 'connectkit'
@@ -25,6 +25,23 @@ type Adapter = Awaited<ReturnType<typeof createWalletAdapter>>['adapter']
 interface Quote {
   gas: { label: string; value: string }[]
   fees: { label: string; value: string }[]
+  /** USDC taken from the amount by Circle (fast-transfer fee plus the destination mint fee). Null when a fee could not be read. */
+  feeRaw: bigint | null
+}
+
+// Fast transfer: Circle fronts the USDC on the destination chain, so the transfer finishes in seconds
+// instead of waiting for source-chain finality. The fee is taken from the amount that arrives.
+const BRIDGE_CONFIG = { transferSpeed: 'FAST' } as const
+
+/** Sum of the USDC fees in an estimate, in 6-decimal units. Null if any fee is missing or unreadable. */
+function usdcFeesRaw(fees: { amount: string | null; token: string }[]): bigint | null {
+  let total = 0n
+  for (const f of fees) {
+    if (!f.amount) return null
+    if (f.token !== 'USDC') continue
+    try { total += parseUnits(f.amount, 6) } catch { return null }
+  }
+  return total
 }
 
 type StepName = 'approve' | 'burn' | 'fetchAttestation' | 'mint'
@@ -109,8 +126,15 @@ export function CctpBridge() {
         from: { adapter, chain: fromDef },
         to: { adapter, chain: toDef, useForwarder: true, ...(recipient ? { recipientAddress: recipient } : {}) },
         amount: amount.trim(),
+        config: BRIDGE_CONFIG,
       })
+      const feeRaw = usdcFeesRaw(est.fees ?? [])
+      if (feeRaw !== null && amountRaw >= 0n && feeRaw >= amountRaw) {
+        setError(`The amount is too small. Fees are ${formatUnits(feeRaw, 6)} USDC, so nothing would arrive. Try a larger amount.`)
+        return
+      }
       setQuote({
+        feeRaw,
         gas: est.gasFees.map((g) => ({ label: `${g.name} gas (${g.blockchain})`, value: g.fees ? `${g.fees.fee} ${g.token}` : 'unavailable' })),
         fees: (est.fees ?? []).map((f) => ({ label: f.type, value: f.amount ? `${f.amount} ${f.token}` : 'unavailable' })),
       })
@@ -126,13 +150,16 @@ export function CctpBridge() {
     if (!connector || !fromDef || !toDef || !quoteFresh) return
     setError(''); setBusy(mode)
     if (mode === 'bridge') { setDone(new Set()); setResult(null) }
-    const kit = await getKit()
-    const handlers = STEPS.map((name) => {
-      const fn = () => setDone((prev) => new Set(prev).add(name))
-      kit.on(`bridge.${name}` as 'bridge.burn', fn)
-      return [name, fn] as const
-    })
+    let kit: Kit | null = null
+    let handlers: (readonly [StepName, () => void])[] = []
     try {
+      kit = await getKit()
+      const activeKit = kit
+      handlers = STEPS.map((name) => {
+        const fn = () => setDone((prev) => new Set(prev).add(name))
+        activeKit.on(`bridge.${name}` as 'bridge.burn', fn)
+        return [name, fn] as const
+      })
       const chainList = [toViemChain(fromDef), toViemChain(toDef)]
       const { adapter, provider } = await createWalletAdapter(connector, chainList)
       adapterRef.current = adapter
@@ -144,6 +171,7 @@ export function CctpBridge() {
             from: { adapter, chain: fromDef },
             to: { adapter, chain: toDef, useForwarder: true, ...(recipient ? { recipientAddress: recipient } : {}) },
             amount: amount.trim(),
+            config: BRIDGE_CONFIG,
           })
       setResult(res)
       const burnHash = res.steps.find((st) => st.name === 'burn')?.txHash
@@ -165,7 +193,8 @@ export function CctpBridge() {
     } catch (e) {
       setError(kitErrorMessage(e))
     } finally {
-      handlers.forEach(([name, fn]) => kit.off(`bridge.${name}` as 'bridge.burn', fn))
+      const finishedKit = kit
+      if (finishedKit) handlers.forEach(([name, fn]) => finishedKit.off(`bridge.${name}` as 'bridge.burn', fn))
       setBusy(null)
     }
   }
@@ -229,7 +258,13 @@ export function CctpBridge() {
                 <span style={{ color: 'var(--ink-2)' }}>{r.label}</span><span className="tabnum" style={{ color: 'var(--ink)' }}>{r.value}</span>
               </div>
             ))}
-            <p style={{ color: 'var(--subtle)' }}>Estimates can change before the transfer runs.</p>
+            {quote.feeRaw !== null && amountRaw !== null && (
+              <div className="flex justify-between gap-3 pt-1.5 font-semibold" style={{ borderTop: '1px solid var(--border)' }}>
+                <span style={{ color: 'var(--ink)' }}>You receive on {to}</span>
+                <span className="tabnum" style={{ color: 'var(--ink)' }}>{formatUnits(amountRaw - quote.feeRaw, 6)} USDC</span>
+              </div>
+            )}
+            <p style={{ color: 'var(--subtle)' }}>Fast transfer, usually done in under a minute. Estimates can change before the transfer runs.</p>
           </div>
         )}
 
