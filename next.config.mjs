@@ -1,6 +1,10 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   reactStrictMode: true,
+  // Load only the icons, motion helpers and wallet pieces a screen really uses.
+  experimental: {
+    optimizePackageImports: ['lucide-react', 'framer-motion', '@web3icons/react', 'viem', 'wagmi'],
+  },
   // wagmi/viem/connectkit ship ESM — no extra transpilation needed on Next 15.
   // Turso client is server-only (lib/turso + app/api/*); never import it in client components.
   webpack: (config) => {

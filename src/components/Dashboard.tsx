@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import { motion } from 'framer-motion'
 import {
   ArrowDownLeft, ArrowLeftRight, Compass,
@@ -35,9 +35,9 @@ export function Dashboard({ onNavigate }: Props) {
   useBackfillMissingTxRecords()
   useUsdcTransferWatcher(address, () => { void refetch() })
 
-  const recentConvs = filterConversationsForAddress(conversations, address).slice(0, 3)
+  const recentConvs = useMemo(() => filterConversationsForAddress(conversations, address).slice(0, 3), [conversations, address])
   // Newest first, whatever order the list was merged in (own posts, other devices, the server).
-  const recentPosts = [...posts].sort((a, b) => b.createdAt - a.createdAt).slice(0, 3)
+  const recentPosts = useMemo(() => [...posts].sort((a, b) => b.createdAt - a.createdAt).slice(0, 3), [posts])
 
   function copyAddress() {
     if (!address) return
@@ -53,9 +53,10 @@ export function Dashboard({ onNavigate }: Props) {
 
   const container = {
     hidden: {},
-    show: { transition: { staggerChildren: 0.06, delayChildren: 0.08 } },
+    show: { transition: { staggerChildren: 0.025 } },
   }
-  const item = { hidden: { opacity: 0, y: 14 }, show: { opacity: 1, y: 0, transition: { type: 'spring' as const, damping: 24, stiffness: 280 } } }
+  // Short and light: the cards are readable at once instead of waiting for a long spring.
+  const item = { hidden: { opacity: 0, y: 6 }, show: { opacity: 1, y: 0, transition: { duration: 0.16, ease: 'easeOut' as const } } }
 
   return (
     <div className="relative">

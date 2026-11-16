@@ -1,7 +1,7 @@
 'use client'
 
-import { useState, useEffect } from 'react'
-import { motion, AnimatePresence } from 'framer-motion'
+import { Suspense, useState, useEffect } from 'react'
+import { motion } from 'framer-motion'
 import { isAddress } from 'viem'
 import { useArcAccount, useUsdcBalance } from './hooks/useArcWallet'
 import { usePersistentChat } from './hooks/usePersistentChat'
@@ -10,15 +10,11 @@ import { usePersistentTxHistory } from './hooks/usePersistentTxHistory'
 import { useOnchainActivity } from './hooks/useOnchainActivity'
 import { appStore, useTheme } from './store/appStore'
 import { Dashboard } from './components/Dashboard'
-import { MessagesView } from './components/MessagesView'
-import { PayView, type PayMode } from './components/PayView'
-import { SocialFeed } from './components/SocialFeed'
-import { ProfileView } from './components/ProfileView'
-import { NotificationsView } from './components/NotificationsView'
-import { ActivityView } from './components/ActivityView'
-import { SettingsView } from './components/SettingsView'
-import { SwapView } from './components/SwapView'
-import { BridgeView } from './components/BridgeView'
+import {
+  MessagesView, PayView, SocialFeed, ProfileView, NotificationsView, ActivityView,
+  SettingsView, SwapView, BridgeView, prefetchAllViews, prefetchView,
+} from './components/lazyViews'
+import type { PayMode } from './components/PayView'
 import { DesktopNav, DesktopTopBar, MobileNav, MobileTopBar } from './components/Navigation'
 import { StudioBar } from './components/StudioBar'
 import { parsePayPrefill } from './utils/payRequests'
@@ -35,6 +31,17 @@ const VIEW_TITLES: Record<NavView, string> = {
   notifications: 'Notifications',
   profile: 'Profile',
   settings: 'Settings',
+}
+
+/** Shown for a split second only if a screen has not finished downloading yet. */
+function ViewSkeleton() {
+  return (
+    <div aria-hidden className="max-w-2xl mx-auto px-4 pt-4 flex flex-col gap-4">
+      <div className="h-36 rounded-3xl animate-pulse" style={{ background: 'var(--surface-muted)' }} />
+      <div className="h-24 rounded-3xl animate-pulse" style={{ background: 'var(--surface-muted)' }} />
+      <div className="h-24 rounded-3xl animate-pulse" style={{ background: 'var(--surface-muted)' }} />
+    </div>
+  )
 }
 
 interface NavState {
@@ -103,11 +110,17 @@ export default function App() {
   usePersistentTxHistory(address)
   useOnchainActivity(address)
 
+  // Open a pay link's screen right away, and download the other screens while the browser is idle.
+  useEffect(() => {
+    prefetchView(nav.view)
+  }, [nav.view])
+  useEffect(() => prefetchAllViews(), [])
+
   function navigate(view: NavView, extra?: Record<string, string>) {
     setNav({ view, extra })
-    // Scroll to top on navigation
+    // Jump to the top at once: a smooth scroll makes every tap feel slow.
     if (typeof window !== 'undefined') {
-      window.scrollTo({ top: 0, behavior: 'smooth' })
+      window.scrollTo({ top: 0, behavior: 'auto' })
     }
   }
 
@@ -177,18 +190,16 @@ export default function App() {
 
           {/* Page content */}
           <main className="flex-1 pb-16 md:pb-0">
-            <AnimatePresence mode="wait">
-              <motion.div
-                key={nav.view}
-                initial={{ opacity: 0, y: 8 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, y: -8 }}
-                transition={{ duration: 0.12, ease: 'easeOut' }}
-                className="min-h-full"
-              >
-                {renderView()}
-              </motion.div>
-            </AnimatePresence>
+            {/* No exit animation: the new screen appears immediately instead of waiting for the old one to fade. */}
+            <motion.div
+              key={nav.view}
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              transition={{ duration: 0.1, ease: 'easeOut' }}
+              className="min-h-full"
+            >
+              <Suspense fallback={<ViewSkeleton />}>{renderView()}</Suspense>
+            </motion.div>
           </main>
         </div>
       </div>
