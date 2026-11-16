@@ -22,7 +22,7 @@ function Hero() {
   return (
     <section className="relative overflow-hidden">
       <div className="site-grid-bg pointer-events-none absolute inset-0" aria-hidden />
-      <div className="relative mx-auto grid max-w-6xl items-center gap-10 px-4 pb-16 pt-14 sm:px-6 sm:pb-24 sm:pt-20 lg:grid-cols-[1.15fr_0.85fr]">
+      <div className="relative mx-auto grid max-w-6xl items-center gap-10 px-4 pb-16 pt-14 sm:px-6 sm:pb-24 sm:pt-20 lg:grid-cols-[1.1fr_0.9fr] lg:gap-12">
         <div>
           <div className="flex flex-wrap gap-2">
             <Pill><img src="/chains/arc.svg" alt="" width={14} height={14} /> Built on Arc Mainnet</Pill>
@@ -42,8 +42,12 @@ function Hero() {
           </div>
           <p className="site-subtle mt-5 text-xs">Arc Mainnet moves real USDC. Start with a small amount.</p>
         </div>
-        <div className="flex justify-center lg:justify-end">
-          <LandingHero />
+        {/* The animated mark sits in the exact middle of its column, larger on desktop. The box reserves the
+            scaled size, because a transform does not change layout. */}
+        <div className="flex items-center justify-center lg:h-[380px]">
+          <div className="origin-center lg:scale-[1.45]">
+            <LandingHero />
+          </div>
         </div>
       </div>
     </section>
