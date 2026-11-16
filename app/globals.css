@@ -8,6 +8,9 @@
   --bg-gradient: linear-gradient(180deg, #f9f9fc 0%, #fffcf7 52%, #fbf7f2 100%);
   --surface: rgba(255, 255, 255, 0.80);
   --surface-strong: rgba(255, 255, 255, 0.96);
+  /* Solid backgrounds for things that sit over content: the mobile bars and the More sheet. */
+  --sheet-bg: #ffffff;
+  --bar-bg: rgba(255, 255, 255, 0.95);
   --surface-muted: #f2f3f7;
   --ink: #122d45;
   --ink-2: #334155;
@@ -31,6 +34,8 @@
   --bg-gradient: linear-gradient(180deg, #0d1b2f 0%, #0d1b2f 58%, #122d45 100%);
   --surface: rgba(255, 255, 255, 0.07);
   --surface-strong: rgba(255, 255, 255, 0.12);
+  --sheet-bg: #15283f;
+  --bar-bg: rgba(13, 27, 47, 0.95);
   --surface-muted: #1a2b3f;
   --ink: #f9faf3;
   --ink-2: #e3ecf9;

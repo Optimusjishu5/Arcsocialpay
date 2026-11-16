@@ -159,7 +159,7 @@ export function MobileNav({ current, onNavigate }: Props) {
               initial={{ y: 48, opacity: 0 }} animate={{ y: 0, opacity: 1 }} exit={{ y: 48, opacity: 0 }}
               transition={{ type: 'spring', damping: 28, stiffness: 320 }}
               className="relative w-full rounded-t-[28px] px-4 pt-3 safe-bottom"
-              style={{ background: 'var(--surface-strong)', borderTop: '1px solid var(--border)', paddingBottom: 'calc(env(safe-area-inset-bottom, 0px) + 16px)' }}
+              style={{ background: 'var(--sheet-bg)', borderTop: '1px solid var(--border)', boxShadow: '0 -18px 40px -12px rgba(0,0,0,0.45)', paddingBottom: 'calc(env(safe-area-inset-bottom, 0px) + 16px)' }}
             >
               <div className="mx-auto mb-3 h-1 w-10 rounded-full" style={{ background: 'var(--border-strong)' }} />
               <p className="text-xs font-semibold uppercase tracking-wider px-1 mb-2" style={{ color: 'var(--subtle)' }}>More</p>
@@ -169,7 +169,7 @@ export function MobileNav({ current, onNavigate }: Props) {
                     key={id}
                     onClick={() => go(id)}
                     className="flex flex-col items-center gap-1.5 py-3 rounded-2xl transition-transform active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus)]"
-                    style={{ background: current === id ? 'var(--surface-muted)' : 'var(--surface)', border: '1px solid var(--border)', color: current === id ? 'var(--accent)' : 'var(--ink)' }}
+                    style={{ background: current === id ? 'var(--surface-muted)' : 'transparent', border: '1px solid var(--border)', color: current === id ? 'var(--accent)' : 'var(--ink)' }}
                   >
                     <GradientIcon icon={icon} tone={tone} size={36} />
                     <span className="text-xs font-semibold">{label}</span>
@@ -180,7 +180,7 @@ export function MobileNav({ current, onNavigate }: Props) {
                 type="button"
                 onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}
                 className="mt-2 flex w-full min-h-[48px] items-center gap-3 rounded-2xl px-4 transition-transform active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus)]"
-                style={{ background: 'var(--surface)', border: '1px solid var(--border)', color: 'var(--ink)' }}
+                style={{ background: 'transparent', border: '1px solid var(--border)', color: 'var(--ink)' }}
               >
                 {theme === 'dark' ? <Sun size={18} aria-hidden /> : <Moon size={18} aria-hidden />}
                 <span className="text-sm font-semibold">{theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}</span>
@@ -192,9 +192,10 @@ export function MobileNav({ current, onNavigate }: Props) {
 
       <nav className="md:hidden fixed bottom-0 left-0 right-0 z-40 safe-bottom"
         style={{
-          background: 'var(--surface)',
+          background: 'var(--bar-bg)',
           borderTop: '1px solid var(--border)',
           backdropFilter: 'blur(16px)',
+          WebkitBackdropFilter: 'blur(16px)',
         }}>
         <div className="flex items-center px-2 pt-2 pb-1">
           {tabs.map(({ id, label, icon: Icon, tone }) => {
@@ -240,7 +241,7 @@ export function MobileTopBar({ title, onNavigate }: { title: string; onNavigate:
 
   return (
     <div className="md:hidden sticky top-0 z-40 safe-top"
-      style={{ background: 'var(--surface-strong)', borderBottom: '1px solid var(--border)', backdropFilter: 'blur(12px)', WebkitBackdropFilter: 'blur(12px)' }}>
+      style={{ background: 'var(--bar-bg)', borderBottom: '1px solid var(--border)', backdropFilter: 'blur(12px)', WebkitBackdropFilter: 'blur(12px)' }}>
       <div className="flex min-h-[56px] items-center justify-between gap-2 pl-4 pr-2">
         <div className="flex min-w-0 items-center gap-2.5">
           <img src="/logo.png" alt="SocialPay logo" width={30} height={30}

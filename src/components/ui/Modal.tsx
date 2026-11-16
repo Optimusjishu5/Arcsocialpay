@@ -44,7 +44,7 @@ export function Modal({ open, onClose, title, children, maxWidth = 'max-w-md' }:
             exit={{ opacity: 0, y: 20, scale: 0.97 }}
             transition={{ type: 'spring', damping: 28, stiffness: 380 }}
             className={`relative w-full ${maxWidth} rounded-t-2xl sm:rounded-2xl shadow-2xl overflow-hidden`}
-            style={{ background: 'var(--surface-strong)', border: '1px solid var(--border)' }}
+            style={{ background: 'var(--sheet-bg)', border: '1px solid var(--border)' }}
           >
             {/* Drag handle on mobile */}
             <div className="sm:hidden flex justify-center pt-3 pb-1">
