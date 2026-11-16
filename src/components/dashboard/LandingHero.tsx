@@ -98,7 +98,7 @@ export function LandingHero() {
           y: { duration: 4.2, repeat: Infinity, ease: 'easeInOut', delay: 0.6 },
         }}
       >
-        <img src="/logo.png" alt="" width={TILE} height={TILE} draggable={false}
+        <img src="/logo-256.png" alt="" width={TILE} height={TILE} draggable={false}
           className="block w-full h-full object-cover select-none" />
         {/* Light sweep across the tile */}
         {!calm && (

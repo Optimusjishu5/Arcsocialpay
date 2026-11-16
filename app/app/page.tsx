@@ -1,11 +1,12 @@
 'use client'
 
 import dynamic from 'next/dynamic'
+import { AppLoading } from '../AppLoading'
 
 // The SocialPay app itself (wallet, pay, swap, bridge, chat). Wallet, theme and chat state live in
 // the browser (localStorage), so it is drawn there only. This is the same app that used to be the
 // homepage; payment links (/?pay=...) still open it directly.
-const Root = dynamic(() => import('../root'), { ssr: false })
+const Root = dynamic(() => import('../root'), { ssr: false, loading: () => <AppLoading /> })
 
 export default function AppPage() {
   return <Root />

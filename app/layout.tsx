@@ -9,8 +9,9 @@ export const metadata: Metadata = {
   description:
     'SocialPay combines messaging, a social feed and native USDC payments on Arc Mainnet. Send, request, split, swap and bridge USDC from one app.',
   icons: {
-    icon: '/favicon.ico',
-    apple: '/apple-touch-icon.png',
+    // Small copies of the logo: the originals are 600 KB each and slowed every page.
+    icon: [{ url: '/icon-64.png', type: 'image/png', sizes: '64x64' }],
+    apple: '/apple-touch-icon-180.png',
   },
 }
 

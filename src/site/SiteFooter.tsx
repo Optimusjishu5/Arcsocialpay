@@ -7,7 +7,7 @@ export function SiteFooter() {
       <div className="mx-auto max-w-6xl px-4 py-10 sm:px-6">
         <div className="flex flex-col gap-6 md:flex-row md:items-center md:justify-between">
           <div className="flex items-center gap-3">
-            <img src="/logo.png" alt="" width={28} height={28} className="rounded-lg" style={{ width: 28, height: 28 }} />
+            <img src="/logo-96.png" alt="" width={28} height={28} className="rounded-lg" style={{ width: 28, height: 28 }} />
             <p className="display text-base font-semibold site-ink">
               SocialPay <span className="site-subtle" aria-hidden>|</span> Built on Arc
             </p>

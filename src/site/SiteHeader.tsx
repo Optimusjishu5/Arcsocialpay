@@ -25,9 +25,9 @@ const NAV = [
 
 export function Brand({ size = 32 }: { size?: number }) {
   return (
-    <Link href="/" className="site-focus inline-flex items-center gap-2.5 rounded-lg" aria-label="SocialPay home">
-      <img src="/logo.png" alt="" width={size} height={size} className="rounded-lg" style={{ width: size, height: size }} />
-      <span className="display text-lg font-bold site-ink">SocialPay</span>
+    <Link href="/" className="site-focus inline-flex min-w-0 items-center gap-2 rounded-lg sm:gap-2.5" aria-label="SocialPay home">
+      <img src="/logo-96.png" alt="" width={size} height={size} className="flex-shrink-0 rounded-lg" style={{ width: size, height: size }} />
+      <span className="display truncate text-base font-bold site-ink sm:text-lg">SocialPay</span>
     </Link>
   )
 }
@@ -47,8 +47,8 @@ export function SiteHeader({ onMenu }: { onMenu?: () => void }) {
       className="sticky top-0 z-40"
       style={{ background: 'color-mix(in srgb, var(--bg) 82%, transparent)', backdropFilter: 'blur(16px)', WebkitBackdropFilter: 'blur(16px)', borderBottom: '1px solid var(--border)' }}
     >
-      <div className="mx-auto flex h-16 max-w-6xl items-center justify-between gap-3 px-4 sm:px-6">
-        <div className="flex items-center gap-2">
+      <div className="mx-auto flex h-16 max-w-6xl items-center justify-between gap-2 px-3 sm:gap-3 sm:px-6">
+        <div className="flex min-w-0 items-center gap-2">
           {onMenu && (
             <button
               type="button" onClick={onMenu} aria-label="Open documentation menu"
@@ -69,24 +69,25 @@ export function SiteHeader({ onMenu }: { onMenu?: () => void }) {
           ))}
         </nav>
 
-        <div className="flex items-center gap-2">
+        <div className="flex flex-shrink-0 items-center gap-1.5 sm:gap-2">
           <a
             href={GITHUB_URL} target="_blank" rel="noopener noreferrer" aria-label="SocialPay on GitHub"
-            className="site-focus hidden h-11 w-11 items-center justify-center rounded-full site-ink hover:bg-[var(--surface)] sm:inline-flex"
+            className="site-focus hidden h-11 w-11 items-center justify-center rounded-full site-ink hover:bg-[var(--surface)] lg:inline-flex"
             style={{ border: '1px solid var(--border)' }}
           >
             <Github size={18} aria-hidden />
           </a>
           <a
             href={X_URL} target="_blank" rel="noopener noreferrer" aria-label="SocialPay on X"
-            className="site-focus hidden h-11 w-11 items-center justify-center rounded-full site-ink hover:bg-[var(--surface)] sm:inline-flex"
+            className="site-focus hidden h-11 w-11 items-center justify-center rounded-full site-ink hover:bg-[var(--surface)] lg:inline-flex"
             style={{ border: '1px solid var(--border)' }}
           >
             <XLogo size={16} />
           </a>
           <ThemeToggle />
-          <Link href={APP_URL} className="site-btn site-focus hidden sm:inline-flex">
-            Launch App <ArrowUpRight size={16} aria-hidden />
+          <Link href={APP_URL} className="site-btn site-btn-sm site-focus">
+            <span className="sm:hidden">Launch</span><span className="hidden sm:inline">Launch App</span>
+            <ArrowUpRight size={16} aria-hidden className="flex-shrink-0" />
           </Link>
           <button
             type="button" onClick={() => setOpen((v) => !v)} aria-expanded={open} aria-label={open ? 'Close menu' : 'Open menu'}

@@ -49,7 +49,7 @@ export function DesktopNav({ current, onNavigate }: Props) {
       }}>
       {/* Logo */}
       <div className="px-5 py-5">
-        <img src="/logofull.png" alt="SocialPay" width={120} height={48}
+        <img src="/logofull-320.png" alt="SocialPay" width={120} height={48}
           style={{ height: 32, width: 'auto', objectFit: 'contain', objectPosition: 'left center' }} />
       </div>
 
@@ -128,7 +128,7 @@ const MOBILE_TABS: NavView[] = ['home', 'pay', 'swap', 'bridge', 'activity']
 const MORE_ITEMS: NavView[] = ['messages', 'explore', 'notifications', 'profile', 'settings']
 
 export function MobileNav({ current, onNavigate }: Props) {
-  const { theme, setTheme } = useTheme()
+  const { theme } = useTheme()
   const [moreOpen, setMoreOpen] = useState(false)
   const tabs = MOBILE_TABS.map((id) => NAV_ITEMS.find((n) => n.id === id)).filter((n): n is (typeof NAV_ITEMS)[number] => !!n)
   const moreItems = MORE_ITEMS.map((id) => NAV_ITEMS.find((n) => n.id === id)).filter((n): n is (typeof NAV_ITEMS)[number] => !!n)
@@ -176,15 +176,6 @@ export function MobileNav({ current, onNavigate }: Props) {
                   </button>
                 ))}
               </div>
-              <button
-                type="button"
-                onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}
-                className="mt-2 flex w-full min-h-[48px] items-center gap-3 rounded-2xl px-4 transition-transform active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus)]"
-                style={{ background: 'transparent', border: '1px solid var(--border)', color: 'var(--ink)' }}
-              >
-                {theme === 'dark' ? <Sun size={18} aria-hidden /> : <Moon size={18} aria-hidden />}
-                <span className="text-sm font-semibold">{theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}</span>
-              </button>
             </motion.div>
           </motion.div>
         )}
@@ -233,6 +224,7 @@ function profileTone(addr: string): Tone {
 
 export function MobileTopBar({ title, onNavigate }: { title: string; onNavigate: (view: NavView) => void }) {
   const { address, isConnected } = useArcAccount()
+  const { theme, setTheme } = useTheme()
   const { notifications } = useAppStore()
   const { filterNotifications } = useSettings()
   const unread = filterNotifications(notifications).filter((n) => !n.read).length
@@ -244,11 +236,15 @@ export function MobileTopBar({ title, onNavigate }: { title: string; onNavigate:
       style={{ background: 'var(--bar-bg)', borderBottom: '1px solid var(--border)', backdropFilter: 'blur(12px)', WebkitBackdropFilter: 'blur(12px)' }}>
       <div className="flex min-h-[56px] items-center justify-between gap-2 pl-4 pr-2">
         <div className="flex min-w-0 items-center gap-2.5">
-          <img src="/logo.png" alt="SocialPay logo" width={30} height={30}
+          <img src="/logo-96.png" alt="SocialPay logo" width={30} height={30}
             className="flex-shrink-0 rounded-lg" style={{ width: 30, height: 30, objectFit: 'cover' }} />
           <span className="display truncate text-base font-bold" style={{ color: 'var(--ink)' }}>{title}</span>
         </div>
         <div className="flex flex-shrink-0 items-center">
+          <button onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')} className={btn} style={{ color: 'var(--muted)' }}
+            aria-label={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}>
+            {theme === 'dark' ? <Sun size={20} /> : <Moon size={20} />}
+          </button>
           <button onClick={() => onNavigate('notifications')} aria-label={unread > 0 ? `Alerts, ${unread} unread` : 'Alerts'} className={btn}
             style={{ color: 'var(--muted)' }}>
             <Bell size={20} />

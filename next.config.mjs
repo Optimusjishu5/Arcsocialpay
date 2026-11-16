@@ -5,6 +5,15 @@ const nextConfig = {
   experimental: {
     optimizePackageImports: ['lucide-react', 'framer-motion', '@web3icons/react', 'viem', 'wagmi'],
   },
+  // Logos, chain and token icons rarely change: keep them in the browser for a day and refresh quietly after.
+  async headers() {
+    const cache = [{ key: 'Cache-Control', value: 'public, max-age=86400, stale-while-revalidate=604800' }]
+    return [
+      { source: '/:file(logo.*|logofull.*|icon-.*|apple-touch-icon.*)', headers: cache },
+      { source: '/chains/:path*', headers: cache },
+      { source: '/tokens/:path*', headers: cache },
+    ]
+  },
   // wagmi/viem/connectkit ship ESM — no extra transpilation needed on Next 15.
   // Turso client is server-only (lib/turso + app/api/*); never import it in client components.
   webpack: (config) => {
