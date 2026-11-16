@@ -187,7 +187,7 @@ export default function App() {
           <DesktopTopBar />
 
           {/* Page content */}
-          <main className="flex-1 pb-16 md:pb-0">
+          <main className="flex-1 pb-[calc(84px+env(safe-area-inset-bottom,0px))] md:pb-0">
             {/* No exit animation: the new screen appears immediately instead of waiting for the old one to fade. */}
             <motion.div
               key={nav.view}

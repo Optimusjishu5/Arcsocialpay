@@ -128,7 +128,7 @@ const MOBILE_TABS: NavView[] = ['home', 'pay', 'swap', 'bridge', 'activity']
 const MORE_ITEMS: NavView[] = ['messages', 'explore', 'notifications', 'profile', 'settings']
 
 export function MobileNav({ current, onNavigate }: Props) {
-  const { theme } = useTheme()
+  const { theme, setTheme } = useTheme()
   const [moreOpen, setMoreOpen] = useState(false)
   const tabs = MOBILE_TABS.map((id) => NAV_ITEMS.find((n) => n.id === id)).filter((n): n is (typeof NAV_ITEMS)[number] => !!n)
   const moreItems = MORE_ITEMS.map((id) => NAV_ITEMS.find((n) => n.id === id)).filter((n): n is (typeof NAV_ITEMS)[number] => !!n)
@@ -176,6 +176,15 @@ export function MobileNav({ current, onNavigate }: Props) {
                   </button>
                 ))}
               </div>
+              <button
+                type="button"
+                onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}
+                className="mt-2 flex w-full min-h-[48px] items-center gap-3 rounded-2xl px-4 transition-transform active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus)]"
+                style={{ background: 'var(--surface)', border: '1px solid var(--border)', color: 'var(--ink)' }}
+              >
+                {theme === 'dark' ? <Sun size={18} aria-hidden /> : <Moon size={18} aria-hidden />}
+                <span className="text-sm font-semibold">{theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}</span>
+              </button>
             </motion.div>
           </motion.div>
         )}
@@ -223,61 +232,53 @@ function profileTone(addr: string): Tone {
 
 export function MobileTopBar({ title, onNavigate }: { title: string; onNavigate: (view: NavView) => void }) {
   const { address, isConnected } = useArcAccount()
-  const { theme, setTheme } = useTheme()
   const { notifications } = useAppStore()
   const { filterNotifications } = useSettings()
   const unread = filterNotifications(notifications).filter((n) => !n.read).length
 
+  const btn = 'relative flex h-11 w-11 items-center justify-center rounded-full transition-colors hover:bg-[var(--surface-muted)] active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus)]'
+
   return (
-    <div className="md:hidden flex items-center justify-between px-4 py-3 sticky top-0 z-40"
-      style={{ background: 'var(--surface)', borderBottom: '1px solid var(--border)', backdropFilter: 'blur(12px)' }}>
-      <div className="flex items-center gap-2">
-        <img src="/logo.png" alt="SocialPay logo" width={28} height={28}
-          className="rounded-lg" style={{ width: 28, height: 28, objectFit: 'cover' }} />
-        <span className="display font-bold text-sm" style={{ color: 'var(--ink)' }}>{title}</span>
-      </div>
-      <div className="flex items-center gap-2">
-        <button onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}
-          className="w-8 h-8 rounded-lg flex items-center justify-center transition-colors hover:bg-[var(--surface-muted)]"
-          style={{ color: 'var(--muted)' }}>
-          {theme === 'dark' ? <Sun size={16} /> : <Moon size={16} />}
-        </button>
-        <button onClick={() => onNavigate('notifications')} aria-label="Alerts"
-          className="relative w-8 h-8 rounded-lg flex items-center justify-center transition-colors hover:bg-[var(--surface-muted)]"
-          style={{ color: 'var(--muted)' }}>
-          <Bell size={16} />
-          {unread > 0 && (
-            <span className="absolute -top-0.5 -right-0.5 min-w-3.5 h-3.5 px-0.5 rounded-full font-bold flex items-center justify-center"
-              style={{ background: 'var(--danger)', color: '#fff', fontSize: 8 }}>
-              {unread > 9 ? '9+' : unread}
-            </span>
-          )}
-        </button>
-        <button onClick={() => onNavigate('settings')} aria-label="Settings"
-          className="w-8 h-8 rounded-lg flex items-center justify-center transition-colors hover:bg-[var(--surface-muted)]"
-          style={{ color: 'var(--muted)' }}>
-          <Settings size={16} />
-        </button>
-        {isConnected && address ? (
-          <>
-          <button onClick={() => onNavigate('profile')} aria-label="Your profile" className="transition-transform hover:scale-105 active:scale-95">
-            <span
-              className="block rounded-full p-[2px]"
-              style={{
-                background: `linear-gradient(135deg, ${TONES[profileTone(address)][0]}, ${TONES[profileTone(address)][1]})`,
-                boxShadow: `0 6px 14px -6px ${TONES[profileTone(address)][1]}`,
-              }}
-            >
-              <span className="block rounded-full p-[2px]" style={{ background: 'var(--bg)' }}>
-                <Avatar address={address} size={28} />
+    <div className="md:hidden sticky top-0 z-40 safe-top"
+      style={{ background: 'var(--surface-strong)', borderBottom: '1px solid var(--border)', backdropFilter: 'blur(12px)', WebkitBackdropFilter: 'blur(12px)' }}>
+      <div className="flex min-h-[56px] items-center justify-between gap-2 pl-4 pr-2">
+        <div className="flex min-w-0 items-center gap-2.5">
+          <img src="/logo.png" alt="SocialPay logo" width={30} height={30}
+            className="flex-shrink-0 rounded-lg" style={{ width: 30, height: 30, objectFit: 'cover' }} />
+          <span className="display truncate text-base font-bold" style={{ color: 'var(--ink)' }}>{title}</span>
+        </div>
+        <div className="flex flex-shrink-0 items-center">
+          <button onClick={() => onNavigate('notifications')} aria-label={unread > 0 ? `Alerts, ${unread} unread` : 'Alerts'} className={btn}
+            style={{ color: 'var(--muted)' }}>
+            <Bell size={20} />
+            {unread > 0 && (
+              <span className="absolute right-1.5 top-1.5 flex h-4 min-w-4 items-center justify-center rounded-full px-1 font-bold"
+                style={{ background: 'var(--danger)', color: '#fff', fontSize: 10 }}>
+                {unread > 9 ? '9+' : unread}
               </span>
-            </span>
+            )}
           </button>
-          <DisconnectButton size={32} />
-          </>
-        ) : (
-          <ConnectKitButton label="Connect" />
-        )}
+          {isConnected && address ? (
+            <>
+              <button onClick={() => onNavigate('profile')} aria-label="Your profile" className="flex h-11 w-11 items-center justify-center transition-transform active:scale-95">
+                <span
+                  className="block rounded-full p-[2px]"
+                  style={{
+                    background: `linear-gradient(135deg, ${TONES[profileTone(address)][0]}, ${TONES[profileTone(address)][1]})`,
+                    boxShadow: `0 6px 14px -6px ${TONES[profileTone(address)][1]}`,
+                  }}
+                >
+                  <span className="block rounded-full p-[2px]" style={{ background: 'var(--bg)' }}>
+                    <Avatar address={address} size={28} />
+                  </span>
+                </span>
+              </button>
+              <DisconnectButton size={44} />
+            </>
+          ) : (
+            <ConnectKitButton label="Connect" />
+          )}
+        </div>
       </div>
     </div>
   )

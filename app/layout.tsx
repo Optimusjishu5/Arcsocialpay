@@ -17,6 +17,12 @@ export const metadata: Metadata = {
 export const viewport: Viewport = {
   width: 'device-width',
   initialScale: 1,
+  // Lets the app draw under the notch and home bar; the nav bars add the matching padding.
+  viewportFit: 'cover',
+  themeColor: [
+    { media: '(prefers-color-scheme: dark)', color: '#0d1b2f' },
+    { media: '(prefers-color-scheme: light)', color: '#f9f9fc' },
+  ],
 }
 
 // Runs before first paint so a saved light theme never flashes dark, and a payment link

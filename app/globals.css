@@ -103,6 +103,17 @@ body {
 
 /* Safe area insets for mobile */
 .safe-bottom { padding-bottom: env(safe-area-inset-bottom, 16px); }
+.safe-top { padding-top: env(safe-area-inset-top, 0px); }
+
+/* Mobile comfort: no sideways scroll, no double-tap zoom delay, no grey tap flash, and
+   fields at 16px so iPhones do not zoom the page when one is focused. */
+html, body { overflow-x: clip; }
+body { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
+button, a, summary, [role='button'] { touch-action: manipulation; -webkit-tap-highlight-color: transparent; }
+@media (max-width: 767px) {
+  /* Only fields set smaller than 16px are raised; large amount fields keep their size. */
+  :is(input, select, textarea):is([class*='text-xs'], [class*='text-sm'], [class*='text-[1']):not([class*='text-base']):not([class*='text-lg']):not([class*='text-xl']):not([class*='text-2xl']):not([class*='text-3xl']) { font-size: 16px; }
+}
 
 /* ── Colorful pages (Messages, Pay, Swap, Bridge) ─────────────────────────
    A page opts in with className="tone-scope" and --tone-from / --tone-to. */
