@@ -1,0 +1,215 @@
+/**
+ * ArcSocialPay contract binding (Arc Mainnet).
+ *
+ * Source: contracts/ArcSocialPay.sol (single-file, no imports — Remix-ready).
+ * Payments use the deployed contract at SOCIAL_PAY_DEPLOYED_ADDRESS by default; set
+ * NEXT_PUBLIC_SOCIAL_PAY_ADDRESS=0x... only to point at a different deployment.
+ */
+
+export const SOCIAL_PAY_ABI = [
+  // ── Core payments ──
+  {
+    type: 'function',
+    name: 'tip',
+    stateMutability: 'nonpayable',
+    inputs: [
+      { name: 'recipient', type: 'address' },
+      { name: 'amount', type: 'uint256' },
+      { name: 'postId', type: 'string' },
+    ],
+    outputs: [],
+  },
+  {
+    type: 'function',
+    name: 'pay',
+    stateMutability: 'nonpayable',
+    inputs: [
+      { name: 'recipient', type: 'address' },
+      { name: 'amount', type: 'uint256' },
+      { name: 'memo', type: 'string' },
+    ],
+    outputs: [],
+  },
+  // ── Read helpers ──
+  {
+    type: 'function',
+    name: 'myAllowance',
+    stateMutability: 'view',
+    inputs: [{ name: 'account', type: 'address' }],
+    outputs: [{ name: '', type: 'uint256' }],
+  },
+  {
+    type: 'function',
+    name: 'canPay',
+    stateMutability: 'view',
+    inputs: [
+      { name: 'account', type: 'address' },
+      { name: 'amount', type: 'uint256' },
+    ],
+    outputs: [{ name: '', type: 'bool' }],
+  },
+  {
+    type: 'function',
+    name: 'usdc',
+    stateMutability: 'view',
+    inputs: [],
+    outputs: [{ name: '', type: 'address' }],
+  },
+  {
+    type: 'function',
+    name: 'owner',
+    stateMutability: 'view',
+    inputs: [],
+    outputs: [{ name: '', type: 'address' }],
+  },
+  {
+    type: 'function',
+    name: 'pendingOwner',
+    stateMutability: 'view',
+    inputs: [],
+    outputs: [{ name: '', type: 'address' }],
+  },
+  {
+    type: 'function',
+    name: 'paused',
+    stateMutability: 'view',
+    inputs: [],
+    outputs: [{ name: '', type: 'bool' }],
+  },
+  {
+    type: 'function',
+    name: 'VERSION',
+    stateMutability: 'view',
+    inputs: [],
+    outputs: [{ name: '', type: 'string' }],
+  },
+  {
+    type: 'function',
+    name: 'MAX_MEMO_BYTES',
+    stateMutability: 'view',
+    inputs: [],
+    outputs: [{ name: '', type: 'uint256' }],
+  },
+  {
+    type: 'function',
+    name: 'MAX_POST_ID_BYTES',
+    stateMutability: 'view',
+    inputs: [],
+    outputs: [{ name: '', type: 'uint256' }],
+  },
+  // ── Admin ──
+  { type: 'function', name: 'pause', stateMutability: 'nonpayable', inputs: [], outputs: [] },
+  { type: 'function', name: 'unpause', stateMutability: 'nonpayable', inputs: [], outputs: [] },
+  {
+    type: 'function',
+    name: 'proposeOwner',
+    stateMutability: 'nonpayable',
+    inputs: [{ name: 'newOwner', type: 'address' }],
+    outputs: [],
+  },
+  { type: 'function', name: 'acceptOwnership', stateMutability: 'nonpayable', inputs: [], outputs: [] },
+  { type: 'function', name: 'cancelOwnershipTransfer', stateMutability: 'nonpayable', inputs: [], outputs: [] },
+  {
+    type: 'function',
+    name: 'rescueERC20',
+    stateMutability: 'nonpayable',
+    inputs: [
+      { name: 'token', type: 'address' },
+      { name: 'to', type: 'address' },
+      { name: 'amount', type: 'uint256' },
+    ],
+    outputs: [],
+  },
+  {
+    type: 'function',
+    name: 'rescueNative',
+    stateMutability: 'nonpayable',
+    inputs: [{ name: 'to', type: 'address' }],
+    outputs: [],
+  },
+  // ── Events ──
+  {
+    type: 'event',
+    name: 'Tip',
+    inputs: [
+      { name: 'sender', type: 'address', indexed: true },
+      { name: 'recipient', type: 'address', indexed: true },
+      { name: 'amount', type: 'uint256', indexed: false },
+      { name: 'postId', type: 'string', indexed: false },
+    ],
+    anonymous: false,
+  },
+  {
+    type: 'event',
+    name: 'Payment',
+    inputs: [
+      { name: 'sender', type: 'address', indexed: true },
+      { name: 'recipient', type: 'address', indexed: true },
+      { name: 'amount', type: 'uint256', indexed: false },
+      { name: 'memo', type: 'string', indexed: false },
+    ],
+    anonymous: false,
+  },
+  {
+    type: 'event',
+    name: 'OwnershipTransferred',
+    inputs: [
+      { name: 'previousOwner', type: 'address', indexed: true },
+      { name: 'newOwner', type: 'address', indexed: true },
+    ],
+    anonymous: false,
+  },
+  {
+    type: 'event',
+    name: 'OwnershipProposed',
+    inputs: [
+      { name: 'currentOwner', type: 'address', indexed: true },
+      { name: 'proposedOwner', type: 'address', indexed: true },
+    ],
+    anonymous: false,
+  },
+  {
+    type: 'event',
+    name: 'Paused',
+    inputs: [{ name: 'account', type: 'address', indexed: true }],
+    anonymous: false,
+  },
+  {
+    type: 'event',
+    name: 'Unpaused',
+    inputs: [{ name: 'account', type: 'address', indexed: true }],
+    anonymous: false,
+  },
+  {
+    type: 'event',
+    name: 'Rescued',
+    inputs: [
+      { name: 'token', type: 'address', indexed: true },
+      { name: 'to', type: 'address', indexed: true },
+      { name: 'amount', type: 'uint256', indexed: false },
+    ],
+    anonymous: false,
+  },
+] as const
+
+/** The ArcSocialPay deployment on Arc Mainnet (owner-verified onchain, see README). */
+export const SOCIAL_PAY_DEPLOYED_ADDRESS = '0x3b61FC789342B02Ae9DA3Bcece910AFaAd40bf54' as const
+
+const ENV_ADDRESS =
+  (typeof process !== 'undefined' ? process.env.NEXT_PUBLIC_SOCIAL_PAY_ADDRESS : undefined)?.trim() ?? ''
+
+/**
+ * The ArcSocialPay contract every payment, tip and in-chat pay goes through. It is the deployment
+ * above unless NEXT_PUBLIC_SOCIAL_PAY_ADDRESS holds a different, valid address.
+ */
+export const SOCIAL_PAY_ADDRESS: string = /^0x[0-9a-fA-F]{40}$/.test(ENV_ADDRESS) ? ENV_ADDRESS : SOCIAL_PAY_DEPLOYED_ADDRESS
+
+/** True when payments route through the contract (always: the deployed address is the default). */
+export function isSocialPayConfigured(): boolean {
+  return /^0x[0-9a-fA-F]{40}$/.test(SOCIAL_PAY_ADDRESS)
+}
+
+/** The address Settings shows: the configured one, else the known deployment. */
+export function socialPayDisplayAddress(): string {
+  return isSocialPayConfigured() ? SOCIAL_PAY_ADDRESS : SOCIAL_PAY_DEPLOYED_ADDRESS
+}

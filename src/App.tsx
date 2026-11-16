@@ -16,7 +16,6 @@ import {
 } from './components/lazyViews'
 import type { PayMode } from './components/PayView'
 import { DesktopNav, DesktopTopBar, MobileNav, MobileTopBar } from './components/Navigation'
-import { StudioBar } from './components/StudioBar'
 import { parsePayPrefill } from './utils/payRequests'
 import type { NavView } from './types/index'
 
@@ -177,7 +176,6 @@ export default function App() {
         color: 'var(--ink)',
       }}
     >
-      <StudioBar />
       <div className="flex">
         {/* Desktop Sidebar */}
         <DesktopNav current={nav.view} onNavigate={(v) => navigate(v)} />
