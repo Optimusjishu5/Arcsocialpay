@@ -1,4 +1,5 @@
 import { ReactNode, useEffect } from 'react'
+import { createPortal } from 'react-dom'
 import { motion, AnimatePresence } from 'framer-motion'
 import { X } from 'lucide-react'
 
@@ -27,7 +28,10 @@ export function Modal({ open, onClose, title, children, maxWidth = 'max-w-md' }:
     return () => window.removeEventListener('keydown', onKey)
   }, [open, onClose])
 
-  return (
+  // Drawn on the page itself, not inside the card that opened it. Cards use a blurred, clipped
+  // surface on desktop, which would otherwise trap and cut off a fixed popup.
+  if (typeof document === 'undefined') return null
+  return createPortal(
     <AnimatePresence>
       {open && (
         <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4">
@@ -67,6 +71,7 @@ export function Modal({ open, onClose, title, children, maxWidth = 'max-w-md' }:
           </motion.div>
         </div>
       )}
-    </AnimatePresence>
+    </AnimatePresence>,
+    document.body,
   )
 }

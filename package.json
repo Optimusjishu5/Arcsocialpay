@@ -21,8 +21,8 @@
     "db:health": "curl -s http://localhost:3000/api/health | head -c 2000"
   },
   "dependencies": {
-    "@circle-fin/adapter-viem-v2": "^1.19.3",
-    "@circle-fin/app-kit": "^1.19.0",
+    "@circle-fin/adapter-viem-v2": "^1.20.2",
+    "@circle-fin/app-kit": "^1.22.0",
     "@libsql/client": "^0.15.0",
     "@openzeppelin/contracts": "5.1.0",
     "@solana/kit": "^8.0.0",

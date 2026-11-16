@@ -1,23 +1,21 @@
 'use client'
 
 import { useState } from 'react'
-import { GitCompare, Layers, Link2, Waypoints } from 'lucide-react'
+import { Link2, Route, Waypoints } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 import { CctpBridge } from './bridge/CctpBridge'
-import { LifiBridge } from './bridge/LifiBridge'
 import { RouteBridge } from './bridge/RouteBridge'
 import { GradientIcon, toneVars, type Tone } from './dashboard/ui'
 
-type TabId = 'lifi' | 'circle' | 'compare'
+type TabId = 'routes' | 'circle'
 
 const TABS: { id: TabId; label: string; hint: string; icon: LucideIcon; tone: Tone }[] = [
-  { id: 'lifi', label: 'LI.FI', hint: 'Every EVM network', icon: Layers, tone: 'violet' },
+  { id: 'routes', label: 'Best route', hint: 'LI.FI · Across · Relay', icon: Route, tone: 'violet' },
   { id: 'circle', label: 'Circle CCTP', hint: 'Native USDC, 1:1', icon: Link2, tone: 'blue' },
-  { id: 'compare', label: 'Compare', hint: 'Across, Relay, LI.FI', icon: GitCompare, tone: 'amber' },
 ]
 
 export function BridgeView() {
-  const [tab, setTab] = useState<TabId>('lifi')
+  const [tab, setTab] = useState<TabId>('routes')
   const active = TABS.find((t) => t.id === tab) ?? TABS[0]
   return (
     <div className="tone-scope max-w-lg mx-auto px-4 pt-4 pb-8 space-y-4" style={toneVars(active.tone)}>
@@ -28,7 +26,7 @@ export function BridgeView() {
           <p className="text-xs" style={{ color: 'var(--muted)' }}>Move USDC to and from Arc</p>
         </div>
       </div>
-      <div role="tablist" aria-label="Bridge route" className="flex gap-2 overflow-x-auto -mx-4 px-4 pb-1 snap-x" style={{ scrollbarWidth: 'none' }}>
+      <div role="tablist" aria-label="Bridge route" className="grid grid-cols-2 gap-2">
         {TABS.map((t) => {
           const isActive = tab === t.id
           return (
@@ -37,7 +35,7 @@ export function BridgeView() {
               role="tab"
               aria-selected={isActive}
               onClick={() => setTab(t.id)}
-              className="snap-start flex-shrink-0 flex items-center gap-2.5 px-3 h-14 min-w-[148px] rounded-2xl transition-all active:scale-95 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus)]"
+              className="flex min-w-0 items-center gap-2.5 px-3 h-14 rounded-2xl transition-all active:scale-95 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus)]"
               style={{
                 background: isActive ? 'var(--surface-strong)' : 'var(--surface)',
                 border: `1.5px solid ${isActive ? 'var(--border-strong)' : 'var(--border)'}`,
@@ -45,17 +43,16 @@ export function BridgeView() {
               }}
             >
               <GradientIcon icon={t.icon} tone={t.tone} size={34} />
-              <span className="flex flex-col leading-tight">
-                <span className="text-sm font-semibold whitespace-nowrap" style={{ color: isActive ? 'var(--ink)' : 'var(--muted)' }}>{t.label}</span>
-                <span className="text-[10px] whitespace-nowrap" style={{ color: 'var(--subtle)' }}>{t.hint}</span>
+              <span className="flex min-w-0 flex-col leading-tight">
+                <span className="truncate text-sm font-semibold" style={{ color: isActive ? 'var(--ink)' : 'var(--muted)' }}>{t.label}</span>
+                <span className="truncate text-[10px]" style={{ color: 'var(--subtle)' }}>{t.hint}</span>
               </span>
             </button>
           )
         })}
       </div>
-      {tab === 'lifi' && <LifiBridge />}
+      {tab === 'routes' && <RouteBridge />}
       {tab === 'circle' && <CctpBridge />}
-      {tab === 'compare' && <RouteBridge />}
     </div>
   )
 }

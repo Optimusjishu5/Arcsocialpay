@@ -5,7 +5,7 @@ import { createPublicClient, erc20Abi, formatUnits, http, isAddress, parseUnits 
 import { useAccount } from 'wagmi'
 import { appStore } from '../../store/appStore'
 import { ConnectKitButton } from 'connectkit'
-import { AlertCircle, ArrowDown, Check, ExternalLink, Loader2 } from 'lucide-react'
+import { AlertCircle, ArrowUpDown, Check, ExternalLink, Loader2 } from 'lucide-react'
 import type { AppKit } from '@circle-fin/app-kit'
 import { Button } from '../ui/Button'
 import {
@@ -83,6 +83,20 @@ export function CctpBridge() {
       .catch(() => setError('Could not load the list of supported chains.'))
     return () => { cancelled = true }
   }, [])
+
+  // Picking the network that is already on the other side flips the two instead of erroring.
+  function pickFrom(v: string) {
+    if (v === to) setTo(from)
+    setFrom(v); setQuote(null); setBalance(null)
+  }
+  function pickTo(v: string) {
+    if (v === from) setFrom(to)
+    setTo(v); setQuote(null)
+    if (v === from) setBalance(null)
+  }
+  function flip() {
+    setFrom(to); setTo(from); setQuote(null); setBalance(null)
+  }
 
   const fromDef = chains.find((c) => String(c.chain) === from)
   const toDef = chains.find((c) => String(c.chain) === to)
@@ -219,9 +233,17 @@ export function CctpBridge() {
       </div>
 
       <div className="rounded-2xl p-4 space-y-4" data-tc="">
-        <KitChainPicker label="From" value={from} chains={chains} onChange={(v) => { setFrom(v); setQuote(null) }} disabled={busy !== null} />
-        <div className="flex justify-center -my-1" style={{ color: 'var(--muted)' }}><ArrowDown size={18} /></div>
-        <KitChainPicker label="To" value={to} chains={chains} onChange={(v) => { setTo(v); setQuote(null) }} disabled={busy !== null} />
+        <KitChainPicker label="From" value={from} chains={chains} onChange={pickFrom} disabled={busy !== null} />
+        <div className="flex justify-center -my-1">
+          <button
+            type="button" onClick={flip} disabled={busy !== null || chains.length === 0} aria-label="Swap From and To networks" title="Swap networks"
+            className="flex h-11 w-11 items-center justify-center rounded-full transition-transform active:scale-90 hover:rotate-180 disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus)]"
+            style={{ background: 'var(--surface-strong)', border: '1px solid var(--border-strong)', color: 'var(--tone-text, var(--ink))', transitionDuration: '250ms' }}
+          >
+            <ArrowUpDown size={18} aria-hidden />
+          </button>
+        </div>
+        <KitChainPicker label="To" value={to} chains={chains} onChange={pickTo} disabled={busy !== null} />
 
         <div>
           <div className="flex items-center justify-between mb-1.5">
