@@ -1,9 +1,8 @@
 import { useState, useRef, useEffect } from 'react'
 import { toast } from 'sonner'
-import { motion, AnimatePresence } from 'framer-motion'
 import {
   Search, Plus, Send, ArrowLeft, Reply, Trash2, DollarSign, X,
-  Check, CheckCheck, Clock, AlertCircle, MoreHorizontal, MessageSquare
+  CheckCheck, Clock, AlertCircle, MessageSquare, Loader2
 } from 'lucide-react'
 import { isAddress } from 'viem'
 import { useWaitForTransactionReceipt } from 'wagmi'
@@ -37,17 +36,31 @@ interface Props {
 /** Shown only when chats are kept on the server and this wallet has not signed in yet. */
 function ChatSignInNotice() {
   const state = useChatAuthState()
-  if (state !== 'declined' && state !== 'unavailable' && state !== 'signing') return null
+  const [slow, setSlow] = useState(false)
+
+  // If the wallet never shows the request, offer a way to ask again instead of waiting forever.
+  useEffect(() => {
+    if (state !== 'signing') return
+    const t = setTimeout(() => setSlow(true), 20_000)
+    return () => { clearTimeout(t); setSlow(false) }
+  }, [state])
+
+  if (state !== 'idle' && state !== 'declined' && state !== 'unavailable' && state !== 'signing') return null
+  const signing = state === 'signing'
+  const text =
+    signing ? (slow ? 'No request showing? Open your wallet app and look for the signature request, or ask again.' : 'Confirm the free signature in your wallet to load your chats.')
+    : state === 'unavailable' ? 'Chat sync is unavailable right now. Your chats on this device are shown.'
+    : state === 'declined' ? 'Signature not completed. Sign in to load your saved chats. It is free and sends no money.'
+    : 'Sign in with your wallet to load your saved chats. It is a free signature.'
+  const action = signing ? (slow ? 'Ask again' : null) : state === 'unavailable' ? 'Retry' : 'Sign in'
   return (
-    <div className="mx-3 mb-2 flex items-center gap-2 rounded-xl px-3 py-2 text-xs" style={{ background: 'var(--surface-muted)', color: 'var(--ink-2)' }} role="status">
-      <span className="flex-1">
-        {state === 'signing' ? 'Confirm the free signature in your wallet to load your chats.'
-          : state === 'unavailable' ? 'Chat sync is unavailable right now. Your chats on this device are shown.'
-          : 'Sign in with your wallet to load your saved chats. It is a free signature.'}
-      </span>
-      {state !== 'signing' && (
-        <button onClick={retrySignIn} className="h-8 px-3 rounded-full font-semibold" style={{ background: 'var(--surface-strong)', border: '1px solid var(--border)', color: 'var(--accent)' }}>
-          {state === 'unavailable' ? 'Retry' : 'Sign in'}
+    <div className="mx-3 mb-2 flex items-center gap-3 rounded-2xl px-3 py-3 text-xs" style={{ background: 'var(--surface-muted)', color: 'var(--ink-2)', border: '1px solid var(--border)' }} role="status" aria-live="polite">
+      {signing && !slow && <Loader2 size={16} className="flex-shrink-0 animate-spin" style={{ color: 'var(--tone-text, var(--accent))' }} aria-hidden />}
+      <span className="flex-1 leading-snug">{text}</span>
+      {action && (
+        <button onClick={retrySignIn} className="h-11 flex-shrink-0 rounded-full px-4 text-sm font-semibold active:scale-95 transition-transform"
+          style={toneStyle('violet')}>
+          {action}
         </button>
       )}
     </div>
@@ -60,6 +73,21 @@ export function MessagesView({ initialConvId }: Props) {
   const [activeConvId, setActiveConvId] = useState<string | null>(initialConvId ?? null)
   const [search, setSearch] = useState('')
   const [showNewChat, setShowNewChat] = useState(false)
+  const authState = useChatAuthState()
+
+  // Opening Messages is the moment to ask for the free sign-in, once per visit.
+  const asked = useRef(false)
+  useEffect(() => {
+    if (isConnected && authState === 'idle' && !asked.current) { asked.current = true; retrySignIn() }
+  }, [isConnected, authState])
+
+  // While a chat is open on a phone, the bottom tabs step aside so the message box is never covered.
+  useEffect(() => {
+    const el = document.documentElement
+    if (activeConvId) el.setAttribute('data-chat-open', '1')
+    else el.removeAttribute('data-chat-open')
+    return () => el.removeAttribute('data-chat-open')
+  }, [activeConvId])
 
   if (!isConnected) {
     return (
@@ -87,7 +115,7 @@ export function MessagesView({ initialConvId }: Props) {
   const showChat = !!activeConvId
 
   return (
-    <div className="tone-scope flex h-[calc(100dvh-60px)] overflow-hidden" style={toneVars('violet')}>
+    <div className={`tone-scope flex overflow-hidden md:h-[calc(100dvh-60px)] ${showChat ? 'h-[calc(100dvh-var(--topbar-h))]' : 'h-[calc(100dvh-var(--topbar-h)-var(--bottomnav-h))]'}`} style={toneVars('violet')}>
       {/* Conversation List */}
       <div className={`flex flex-col border-r ${showChat ? 'hidden md:flex' : 'flex'} w-full md:w-80 flex-shrink-0`}
         style={{ borderColor: 'var(--border)', background: 'var(--surface)' }}>
@@ -98,14 +126,14 @@ export function MessagesView({ initialConvId }: Props) {
             <h2 className="display font-semibold text-base" style={{ color: 'var(--ink)' }}>Messages</h2>
           </div>
           <button onClick={() => setShowNewChat(true)} aria-label="New chat"
-            className="w-9 h-9 rounded-full flex items-center justify-center transition-transform active:scale-95 hover:-translate-y-0.5"
+            className="w-11 h-11 rounded-full flex items-center justify-center transition-transform active:scale-95 hover:-translate-y-0.5"
             style={toneStyle('pink')}>
             <Plus size={18} />
           </button>
         </div>
         {/* Search */}
         <div className="px-3 py-2">
-          <div className="flex items-center gap-2 h-9 px-3 rounded-xl"
+          <div className="flex items-center gap-2 h-11 px-3 rounded-xl"
             data-tp="">
             <Search size={14} style={{ color: 'var(--subtle)' }} />
             <input
@@ -147,7 +175,7 @@ export function MessagesView({ initialConvId }: Props) {
       </div>
 
       {/* Chat Panel */}
-      <div className={`flex-1 flex flex-col ${showList ? 'hidden md:flex' : 'flex'}`}>
+      <div className={`flex-1 min-w-0 flex-col ${showList ? 'hidden md:flex' : 'flex'}`}>
         {activeConv ? (
           <ChatPanel
             conv={activeConv}
@@ -187,14 +215,14 @@ function ConvItem({ conv, myAddress, isActive, onClick }: {
   return (
     <button
       onClick={onClick}
-      className="flex items-center gap-3 w-full px-4 py-3 transition-colors text-left"
+      className="flex items-center gap-3 w-full px-4 py-3.5 min-h-[68px] transition-colors text-left active:bg-[var(--surface-muted)]"
       style={{ background: isActive ? 'var(--surface-muted)' : 'transparent' }}
     >
       <Avatar address={other} size={44} showRing={isActive} />
       <div className="flex-1 min-w-0">
-        <div className="flex items-center justify-between mb-0.5">
+        <div className="flex items-center justify-between gap-2 mb-0.5">
           <span className="font-semibold text-sm truncate" style={{ color: 'var(--ink)' }}>
-            {formatAddress(other)}
+            {appStore.getProfile(other)?.username || formatAddress(other)}
           </span>
           {conv.lastMessage && (
             <span className="text-xs flex-shrink-0" style={{ color: 'var(--subtle)' }}>
@@ -202,8 +230,9 @@ function ConvItem({ conv, myAddress, isActive, onClick }: {
             </span>
           )}
         </div>
+        {!conv.lastMessage && <p className="text-xs" style={{ color: 'var(--subtle)' }}>No messages yet</p>}
         {conv.lastMessage && (
-          <p className="text-xs truncate" style={{ color: 'var(--muted)' }}>
+          <p className="text-sm truncate" style={{ color: 'var(--muted)' }}>
             {isSameAddress(conv.lastMessage.senderAddress, myAddress) ? 'You: ' : ''}
             {conv.lastMessage.paymentTx
               ? `Sent ${conv.lastMessage.paymentTx.amount} USDC`
@@ -212,7 +241,7 @@ function ConvItem({ conv, myAddress, isActive, onClick }: {
         )}
       </div>
       {conv.unreadCount > 0 && (
-        <span className="w-5 h-5 rounded-full text-xs font-bold flex items-center justify-center flex-shrink-0"
+        <span className="min-w-[22px] h-[22px] px-1 rounded-full text-xs font-bold flex items-center justify-center flex-shrink-0"
           style={toneStyle('pink')}>
           {conv.unreadCount > 9 ? '9+' : conv.unreadCount}
         </span>
@@ -281,24 +310,25 @@ function ChatPanel({ conv, myAddress, messages, onBack }: {
   const visibleMessages = messages.filter((m) => !m.deletedForMe)
 
   return (
-    <div className="flex flex-col h-full" style={{ background: 'var(--bg)' }}>
+    <div className="flex h-full min-w-0 flex-col" style={{ background: 'var(--bg)', paddingBottom: 'env(safe-area-inset-bottom, 0px)' }}>
       {/* Header */}
-      <div className="flex items-center gap-3 px-4 py-3 flex-shrink-0"
-        style={{ borderBottom: '1px solid var(--border)', background: 'var(--surface)' }}>
-        <button onClick={onBack} className="md:hidden p-1.5 rounded-lg transition-colors hover:bg-[var(--surface-muted)]"
-          style={{ color: 'var(--muted)' }}>
-          <ArrowLeft size={18} />
+      <div className="flex items-center gap-2 px-2 py-2 sm:gap-3 sm:px-4 sm:py-3 flex-shrink-0"
+        style={{ borderBottom: '1px solid var(--border)', background: 'var(--surface-strong)' }}>
+        <button onClick={onBack} aria-label="Back to chats" className="md:hidden flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-full transition-colors active:scale-95 hover:bg-[var(--surface-muted)]"
+          style={{ color: 'var(--ink)' }}>
+          <ArrowLeft size={20} />
         </button>
         <Avatar address={other} size={36} />
         <div className="flex-1 min-w-0">
-          <div className="font-semibold text-sm" style={{ color: 'var(--ink)' }}>
-            {formatAddress(other)}
+          <div className="truncate font-semibold text-sm" style={{ color: 'var(--ink)' }}>
+            {appStore.getProfile(other)?.username || formatAddress(other)}
           </div>
-          <div className="mono text-xs truncate" style={{ color: 'var(--subtle)' }}>{other}</div>
+          <div className="mono hidden truncate text-xs sm:block" style={{ color: 'var(--subtle)' }}>{other}</div>
+          <div className="mono truncate text-[11px] sm:hidden" style={{ color: 'var(--subtle)' }}>{formatAddress(other)}</div>
         </div>
         <button
           onClick={() => setShowPayModal(true)}
-          className="flex items-center gap-1.5 h-9 px-3.5 rounded-xl text-xs font-semibold transition-all active:scale-95 hover:-translate-y-0.5"
+          className="flex h-11 flex-shrink-0 items-center gap-1.5 rounded-xl px-4 text-sm font-semibold transition-all active:scale-95 hover:-translate-y-0.5"
           style={toneStyle('green')}>
           <DollarSign size={14} />
           Pay
@@ -306,7 +336,7 @@ function ChatPanel({ conv, myAddress, messages, onBack }: {
       </div>
 
       {/* Messages */}
-      <div ref={scrollRef} className="flex-1 overflow-y-auto px-4 py-4 space-y-2">
+      <div ref={scrollRef} className="flex-1 min-h-0 overflow-y-auto overscroll-contain px-3 py-4 space-y-2 sm:px-4">
         {visibleMessages.length === 0 && (
           <div className="flex items-center justify-center py-12">
             <p className="text-sm" style={{ color: 'var(--muted)' }}>Start the conversation</p>
@@ -338,8 +368,8 @@ function ChatPanel({ conv, myAddress, messages, onBack }: {
       )}
 
       {/* Input */}
-      <div className="flex items-end gap-2 px-4 py-3 flex-shrink-0"
-        style={{ borderTop: '1px solid var(--border)', background: 'var(--surface)' }}>
+      <div className="flex items-end gap-2 px-3 py-2.5 sm:px-4 sm:py-3 flex-shrink-0"
+        style={{ borderTop: '1px solid var(--border)', background: 'var(--surface-strong)' }}>
         <div className="flex-1 rounded-2xl px-4 py-2 min-h-[44px] max-h-28 overflow-hidden"
           data-tp="">
           <textarea
@@ -350,6 +380,8 @@ function ChatPanel({ conv, myAddress, messages, onBack }: {
             }}
             placeholder="Message..."
             rows={1}
+            enterKeyHint="send"
+            aria-label="Message"
             className="w-full text-sm bg-transparent outline-none resize-none"
             style={{ color: 'var(--ink)' }}
           />
@@ -363,7 +395,7 @@ function ChatPanel({ conv, myAddress, messages, onBack }: {
         </button>
       </div>
       {chatSigning.required && (
-        <p className="px-4 pb-2 text-xs flex-shrink-0" style={{ color: 'var(--subtle)', background: 'var(--surface)' }}>
+        <p className="px-4 pb-2 text-[11px] flex-shrink-0" style={{ color: 'var(--subtle)', background: 'var(--surface-strong)' }}>
           Messages are signed with your wallet so they can be verified as yours.
         </p>
       )}
@@ -396,10 +428,12 @@ function MessageBubble({ msg, isMine, allMessages, onReply, onDelete }: {
   onDelete: () => void
 }) {
   const replyMsg = msg.replyToId ? allMessages.find((m) => m.id === msg.replyToId) : null
+  // Phones have no hover, so tapping a message shows Reply and Delete under it.
+  const [tapped, setTapped] = useState(false)
 
   return (
     <div className={`flex ${isMine ? 'justify-end' : 'justify-start'} group`}>
-      <div className={`max-w-[75%] ${isMine ? 'items-end' : 'items-start'} flex flex-col gap-0.5`}>
+      <div className={`max-w-[85%] sm:max-w-[75%] ${isMine ? 'items-end' : 'items-start'} flex flex-col gap-0.5`}>
         {replyMsg && (
           <div className="px-3 py-1.5 rounded-xl text-xs border-l-2 mb-0.5"
             style={{
@@ -412,7 +446,7 @@ function MessageBubble({ msg, isMine, allMessages, onReply, onDelete }: {
           </div>
         )}
 
-        <div className="relative">
+        <div className="relative" onClick={() => setTapped((v) => !v)}>
           {/* Payment card */}
           {msg.paymentTx ? (
             <PaymentBubble paymentTx={msg.paymentTx} isMine={isMine} />
@@ -437,8 +471,8 @@ function MessageBubble({ msg, isMine, allMessages, onReply, onDelete }: {
             </div>
           )}
 
-          {/* Actions */}
-          <div className={`absolute top-1/2 -translate-y-1/2 ${isMine ? 'right-full mr-1' : 'left-full ml-1'} opacity-0 group-hover:opacity-100 transition-opacity flex items-center gap-0.5`}>
+          {/* Actions (hover on desktop) */}
+          <div className={`absolute top-1/2 -translate-y-1/2 ${isMine ? 'right-full mr-1' : 'left-full ml-1'} opacity-0 group-hover:opacity-100 transition-opacity hidden md:flex items-center gap-0.5`}>
             <button onClick={onReply}
               className="w-7 h-7 rounded-full flex items-center justify-center transition-colors hover:bg-[var(--surface-muted)]"
               style={{ color: 'var(--muted)' }}>
@@ -451,6 +485,18 @@ function MessageBubble({ msg, isMine, allMessages, onReply, onDelete }: {
             </button>
           </div>
         </div>
+        {tapped && (
+          <div className="flex items-center gap-2 md:hidden">
+            <button onClick={() => { setTapped(false); onReply() }} className="flex h-10 items-center gap-1.5 rounded-full px-3.5 text-xs font-semibold active:scale-95"
+              style={{ background: 'var(--surface-muted)', color: 'var(--ink)', border: '1px solid var(--border)' }}>
+              <Reply size={14} /> Reply
+            </button>
+            <button onClick={() => { setTapped(false); onDelete() }} className="flex h-10 items-center gap-1.5 rounded-full px-3.5 text-xs font-semibold active:scale-95"
+              style={{ background: 'var(--danger-bg)', color: 'var(--danger)' }}>
+              <Trash2 size={14} /> Delete for me
+            </button>
+          </div>
+        )}
       </div>
     </div>
   )

@@ -164,7 +164,7 @@ export function PayView({ initialMode = 'send', initialRecipient, initialAmount,
 
       {mode === 'receive' && (
         <button onClick={() => setMode('send')}
-          className="self-start inline-flex items-center gap-1.5 h-9 px-3 rounded-full text-sm font-semibold"
+          className="self-start inline-flex items-center gap-1.5 h-11 px-4 rounded-full text-sm font-semibold"
           style={{ background: 'var(--surface-strong)', border: '1px solid var(--border)', color: 'var(--ink)' }}>
           <SendIcon size={14} /> Back to send
         </button>

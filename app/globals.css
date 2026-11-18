@@ -10,6 +10,9 @@
   --surface-strong: rgba(255, 255, 255, 0.96);
   /* Solid backgrounds for things that sit over content: the mobile bars and the More sheet. */
   --sheet-bg: #ffffff;
+  /* Heights of the phone top bar and bottom tabs, so full-height screens fit exactly between them. */
+  --topbar-h: calc(57px + env(safe-area-inset-top, 0px));
+  --bottomnav-h: calc(72px + env(safe-area-inset-bottom, 0px));
   --bar-bg: rgba(255, 255, 255, 0.95);
   --surface-muted: #f2f3f7;
   --ink: #122d45;
@@ -113,6 +116,12 @@ body {
     -webkit-backdrop-filter: none !important;
     backdrop-filter: none !important;
   }
+}
+
+/* An open chat on a phone uses the whole screen: the bottom tabs step aside. */
+@media (max-width: 767px) {
+  html[data-chat-open='1'] .mobile-nav { display: none; }
+  html[data-chat-open='1'] .app-main { padding-bottom: 0; }
 }
 
 /* Safe area insets for mobile */

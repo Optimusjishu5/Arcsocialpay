@@ -87,6 +87,9 @@ export function usePersistentChat(address: string | undefined) {
   const postedMsgs = useRef<Set<string>>(new Set())
   const chainRef = useRef(chainId)
   chainRef.current = chainId
+  // The wallet is only asked to sign when the person opens Messages or taps "Sign in", never on
+  // connect: a surprise signature request on another screen is what mobile wallets tend to drop.
+  const askFor = useRef<string | null>(null)
 
   // 0) Sign in for this wallet. A new wallet always starts from nothing.
   useEffect(() => {
@@ -95,7 +98,7 @@ export function usePersistentChat(address: string | undefined) {
     setSession(null)
     if (!address) { setChatAuthState('off'); return }
     let cancelled = false
-    registerSignInRetry(() => setAttempt((n) => n + 1))
+    registerSignInRetry(() => { askFor.current = address.toLowerCase(); setAttempt((n) => n + 1) })
 
     void (async () => {
       let configured = false
@@ -110,6 +113,7 @@ export function usePersistentChat(address: string | undefined) {
 
       let s = readSession(address)
       if (!s) {
+        if (askFor.current !== address.toLowerCase()) { setChatAuthState('idle'); return }
         setChatAuthState('signing')
         const sign: SignTyped = async (args) => {
           // Wallets only sign typed data for the chain named in the request.

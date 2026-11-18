@@ -20,6 +20,8 @@ export const viewport: Viewport = {
   initialScale: 1,
   // Lets the app draw under the notch and home bar; the nav bars add the matching padding.
   viewportFit: 'cover',
+  // The on-screen keyboard shrinks the page, so the message box stays above it.
+  interactiveWidget: 'resizes-content',
   themeColor: [
     { media: '(prefers-color-scheme: dark)', color: '#0d1b2f' },
     { media: '(prefers-color-scheme: light)', color: '#f9f9fc' },

@@ -13,6 +13,7 @@ export interface ChatSession { address: string; token: string; expiresAt: number
 
 export type ChatAuthState =
   | 'off'          // the server keeps no chat history: nothing to sign in to
+  | 'idle'         // chats are kept on the server; this wallet has not signed in yet and has not been asked
   | 'signing'      // waiting for the wallet signature
   | 'ready'        // signed in
   | 'declined'     // the wallet signature was refused or failed
@@ -36,6 +37,7 @@ export function useChatAuthState(): ChatAuthState {
 /** Set by the chat sync hook so any screen can ask to try signing in again. */
 let retry: (() => void) | null = null
 export const registerSignInRetry = (fn: (() => void) | null) => { retry = fn }
+/** Starts (or restarts) the wallet sign-in. Call it from a tap so mobile wallets are allowed to open. */
 export const retrySignIn = () => retry?.()
 
 export function readSession(address: string, now = Date.now()): ChatSession | null {

@@ -181,8 +181,9 @@ export function MobileNav({ current, onNavigate }: Props) {
         )}
       </AnimatePresence>
 
-      <nav className="md:hidden fixed bottom-0 left-0 right-0 z-40 safe-bottom"
+      <nav className="mobile-nav md:hidden fixed bottom-0 left-0 right-0 z-40 safe-bottom"
         style={{
+          height: 'var(--bottomnav-h)',
           background: 'var(--bar-bg)',
           borderTop: '1px solid var(--border)',
           backdropFilter: 'blur(16px)',
