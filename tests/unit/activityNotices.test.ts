@@ -16,7 +16,7 @@ const pay = (over: Partial<TxRecord> = {}): TxRecord => ({
   id: 't1', txHash: '0x' + 'ab'.repeat(32), chainId: 5042, direction: 'received', amount: '5.00', fromAddress: BOB, toAddress: ME, status: 'confirmed', timestamp: NOW - 2000, kind: 'payment', ...over,
 })
 const input = (over: Partial<NoticeInput> = {}): NoticeInput => ({
-  me: ME, myUsername: 'alice', posts: [], comments: [], txHistory: [], chatPaymentHashes: new Set(), followerCount: 0, socialReady: true, now: NOW, ...over,
+  me: ME, myUsername: 'alice', posts: [], comments: [], txHistory: [], chatPaymentHashes: new Set(), followerCount: 0, followerAddrs: null, socialReady: true, now: NOW, ...over,
 })
 
 describe('payments', () => {
@@ -91,5 +91,15 @@ describe('followers', () => {
     const dropped = findNewNotices(input({ followerCount: 4 }), grew.state)
     expect(dropped.notices).toHaveLength(0)
     expect(findNewNotices(input({ followerCount: 5 }), dropped.state).notices).toHaveLength(1)
+  })
+})
+
+describe('named followers', () => {
+  test('the first look records who follows you, then each new follower is named once', () => {
+    const first = findNewNotices(input({ followerAddrs: [BOB] }), freshState(NOW))
+    expect(first.notices).toHaveLength(0)
+    const next = findNewNotices(input({ followerAddrs: [BOB, CAT] }), first.state)
+    expect(next.notices.map((n) => [n.type, n.from, n.count])).toEqual([['follow', CAT, undefined]])
+    expect(findNewNotices(input({ followerAddrs: [BOB, CAT] }), next.state).notices).toHaveLength(0)
   })
 })

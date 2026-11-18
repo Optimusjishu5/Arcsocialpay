@@ -283,3 +283,7 @@ html[data-paylink='1'] .landing-root { display: none; }
   html { scroll-behavior: auto; }
   .site-btn, .site-btn-ghost { transition: none; }
 }
+
+/* Rows that scroll sideways without a visible bar (notification type chips). */
+.no-scrollbar { scrollbar-width: none; }
+.no-scrollbar::-webkit-scrollbar { display: none; }

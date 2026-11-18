@@ -6,6 +6,7 @@
 import { useCallback, useEffect, useRef } from 'react'
 import { appStore, useAppStore } from '../store/appStore'
 import { announceNotice } from '../lib/incomingAlerts'
+import { getFollowers } from '../lib/followers'
 import { findNewNotices, freshState, type Notice, type NoticeState } from '../lib/activityNotices'
 import { getNotifRules } from './useSettings'
 import { formatAddress } from '../utils/format'
@@ -21,7 +22,7 @@ function load(me: string, now: number): NoticeState {
     if (raw) {
       const s = JSON.parse(raw) as Partial<NoticeState>
       if (typeof s.since === 'number' && Array.isArray(s.seen)) {
-        return { since: s.since, seen: s.seen.filter((x): x is string => typeof x === 'string'), baselined: !!s.baselined, followers: typeof s.followers === 'number' ? s.followers : null }
+        return { since: s.since, seen: s.seen.filter((x): x is string => typeof x === 'string'), baselined: !!s.baselined, followers: typeof s.followers === 'number' ? s.followers : null, followerAddrs: Array.isArray(s.followerAddrs) ? s.followerAddrs.filter((x): x is string => typeof x === 'string') : null }
       }
     }
   } catch { /* fall through to a fresh start */ }
@@ -39,7 +40,7 @@ function words(n: Notice, name: string): { title: string; body: string } {
     case 'repost': return { title: `${name} reposted your post`, body: n.content ?? '' }
     case 'comment': return { title: `${name} commented on your post`, body: n.content ?? '' }
     case 'mention': return { title: `${name} mentioned you`, body: n.content ?? '' }
-    case 'follow': return { title: (n.count ?? 1) > 1 ? `${n.count} new followers` : 'You have a new follower', body: '' }
+    case 'follow': return n.count === undefined ? { title: `${name} started following you`, body: '' } : { title: (n.count ?? 1) > 1 ? `${n.count} new followers` : 'You have a new follower', body: '' }
     default: return { title: name, body: n.content ?? '' }
   }
 }
@@ -61,7 +62,7 @@ export function useActivityNotices(address: string | undefined) {
     const before = load(me, now)
     const { notices, state } = findNewNotices({
       me, myUsername: profile?.username, posts: s.posts, comments: s.comments, txHistory: s.txHistory,
-      chatPaymentHashes, followerCount: profile?.followerCount ?? 0, socialReady: readyFor.current === key, now,
+      chatPaymentHashes, followerCount: profile?.followerCount ?? 0, followerAddrs: getFollowers(me), socialReady: readyFor.current === key, now,
     }, before)
     if (notices.length === 0 && JSON.stringify(state) === JSON.stringify(before)) { if (!localStorage.getItem(KEY(me))) save(me, state); return }
     save(me, state)
@@ -85,7 +86,11 @@ export function useActivityNotices(address: string | undefined) {
       check()
     }
     window.addEventListener(SOCIAL_SYNCED_EVENT, onSynced)
-    return () => window.removeEventListener(SOCIAL_SYNCED_EVENT, onSynced)
+    window.addEventListener('socialpay:followers-synced', check)
+    return () => {
+      window.removeEventListener(SOCIAL_SYNCED_EVENT, onSynced)
+      window.removeEventListener('socialpay:followers-synced', check)
+    }
   }, [check])
 
   // Payments arrive through the transaction history; check whenever anything in the app's data changes.

@@ -19,6 +19,7 @@ import { DesktopNav, DesktopTopBar, MobileNav, MobileTopBar } from './components
 import { parsePayPrefill } from './utils/payRequests'
 import { OPEN_CHAT_EVENT, OPEN_VIEW_EVENT } from './lib/incomingAlerts'
 import { useActivityNotices } from './hooks/useActivityNotices'
+import { useFollowSync } from './hooks/useFollowSync'
 import type { NavView } from './types/index'
 
 const VIEW_TITLES: Record<NavView, string> = {
@@ -107,6 +108,7 @@ export default function App() {
   // Persistent social feed: posts/comments/profiles, same Turso pattern.
   usePersistentSocial(address)
   // Payments, likes, comments, mentions and followers become notifications and alerts.
+  useFollowSync(address)
   useActivityNotices(address)
 
   // Persistent payment history: normal pay + tips render correctly everywhere.

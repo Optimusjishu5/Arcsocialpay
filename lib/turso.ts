@@ -368,6 +368,13 @@ export async function ensureSocialSchema(): Promise<boolean> {
       following_count INTEGER NOT NULL DEFAULT 0,
       created_at INTEGER NOT NULL
     )`,
+    `CREATE TABLE IF NOT EXISTS follows (
+      follower TEXT NOT NULL,
+      followee TEXT NOT NULL,
+      created_at INTEGER NOT NULL,
+      PRIMARY KEY (follower, followee)
+    )`,
+    `CREATE INDEX IF NOT EXISTS idx_follows_followee ON follows(followee, created_at)`,
     `CREATE INDEX IF NOT EXISTS idx_posts_created ON posts(created_at DESC)`,
     `CREATE INDEX IF NOT EXISTS idx_comments_post ON comments(post_id, created_at)`,
   ])
@@ -711,4 +718,33 @@ export async function upsertTxRecord(tx: DbTxRecord): Promise<void> {
       tx.symbol ?? null,
     ],
   })
+}
+
+// ── Follows ────────────────────────────────────────────────────────────────
+
+/** Records that `follower` follows (or stops following) `followee`. Addresses are stored lowercase. */
+export async function setFollow(follower: string, followee: string, on: boolean): Promise<void> {
+  const db = getTursoClient()
+  if (!db) return
+  await ensureSocialSchema()
+  const a = follower.toLowerCase()
+  const b = followee.toLowerCase()
+  if (a === b) return
+  if (on) {
+    await db.execute({ sql: 'INSERT OR IGNORE INTO follows (follower, followee, created_at) VALUES (?, ?, ?)', args: [a, b, Date.now()] })
+  } else {
+    await db.execute({ sql: 'DELETE FROM follows WHERE follower = ? AND followee = ?', args: [a, b] })
+  }
+}
+
+/** Addresses that follow `followee`, newest first. */
+export async function listFollowers(followee: string): Promise<{ address: string; createdAt: number }[]> {
+  const db = getTursoClient()
+  if (!db) return []
+  await ensureSocialSchema()
+  const res = await db.execute({
+    sql: 'SELECT follower, created_at FROM follows WHERE followee = ? ORDER BY created_at DESC LIMIT 1000',
+    args: [followee.toLowerCase()],
+  })
+  return res.rows.map((r) => ({ address: String(r.follower), createdAt: Number(r.created_at) }))
 }

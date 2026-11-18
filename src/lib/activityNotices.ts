@@ -11,6 +11,8 @@ export interface NoticeState {
   baselined: boolean
   /** Follower count at the last look, or null before the first look. */
   followers: number | null
+  /** Addresses that followed you at the last look, or null before the first look. */
+  followerAddrs: string[] | null
 }
 
 export interface NoticeInput {
@@ -22,6 +24,8 @@ export interface NoticeInput {
   /** Payment cards already shown as chat messages (their notification is the message one). */
   chatPaymentHashes: Set<string>
   followerCount: number
+  /** Wallets that follow you, from the server. Null when the server has not told us. */
+  followerAddrs: string[] | null
   /** The server's posts, comments and profiles have been loaded at least once. */
   socialReady: boolean
   now: number
@@ -43,7 +47,7 @@ export const FIRST_LOOK_WINDOW_MS = 24 * 60 * 60 * 1000
 const lc = (s: string) => s.toLowerCase()
 
 export function freshState(now: number): NoticeState {
-  return { since: now - FIRST_LOOK_WINDOW_MS, seen: [], baselined: false, followers: null }
+  return { since: now - FIRST_LOOK_WINDOW_MS, seen: [], baselined: false, followers: null, followerAddrs: null }
 }
 
 const preview = (s: string) => s.replace(/\s+/g, ' ').trim().slice(0, 120)
@@ -62,6 +66,7 @@ export function findNewNotices(input: NoticeInput, previous: NoticeState): { not
   const out: Notice[] = []
   let baselined = previous.baselined
   let followers = previous.followers
+  let followerAddrs = previous.followerAddrs
 
   const add = (n: Notice) => {
     if (seen.has(n.key)) return
@@ -118,8 +123,19 @@ export function findNewNotices(input: NoticeInput, previous: NoticeState): { not
       for (const n of reactions) add(n)
     }
 
-    // New followers: only the count is shared between devices, so the person is not named.
-    if (followers === null) followers = input.followerCount
+    // New followers. With the server's list each one is named; without it only the count is known.
+    if (input.followerAddrs) {
+      const now = input.followerAddrs.map(lc)
+      if (followerAddrs === null) {
+        // First look: record who already follows, announce nobody.
+        followerAddrs = now
+      } else {
+        const known = new Set(followerAddrs)
+        for (const a of input.followerAddrs) if (!known.has(lc(a)) && lc(a) !== me) add({ key: `follow:${lc(a)}`, type: 'follow', from: a, at: input.now })
+        followerAddrs = now
+      }
+      followers = input.followerCount
+    } else if (followers === null) followers = input.followerCount
     else if (input.followerCount > followers) {
       const gained = input.followerCount - followers
       out.push({ key: `follow:${input.followerCount}`, type: 'follow', from: input.me, count: gained, content: gained > 1 ? `${gained} new followers` : undefined, at: input.now })
@@ -131,6 +147,6 @@ export function findNewNotices(input: NoticeInput, previous: NoticeState): { not
 
   return {
     notices: out.sort((a, b) => a.at - b.at),
-    state: { since: previous.since, seen: [...seen].slice(-SEEN_MAX), baselined, followers },
+    state: { since: previous.since, seen: [...seen].slice(-SEEN_MAX), baselined, followers, followerAddrs },
   }
 }

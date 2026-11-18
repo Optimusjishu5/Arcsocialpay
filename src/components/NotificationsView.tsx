@@ -1,4 +1,4 @@
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import { POLL_NOW_EVENT } from '../hooks/usePersistentChat'
 import { OPEN_CHAT_EVENT } from '../lib/incomingAlerts'
 import { motion } from 'framer-motion'
@@ -9,7 +9,18 @@ import { Avatar } from './ui/Avatar'
 import { EmptyState } from './ui/EmptyState'
 import { useSettings } from '../hooks/useSettings'
 import { formatTimestamp, formatAddress } from '../utils/format'
-import type { Notification } from '../types/index'
+import type { Notification, NotifType } from '../types/index'
+
+const FILTERS: Array<{ id: 'all' | NotifType; label: string }> = [
+  { id: 'all', label: 'All' },
+  { id: 'payment', label: 'Payments' },
+  { id: 'message', label: 'Messages' },
+  { id: 'like', label: 'Likes' },
+  { id: 'comment', label: 'Comments' },
+  { id: 'repost', label: 'Reposts' },
+  { id: 'follow', label: 'Followers' },
+  { id: 'mention', label: 'Mentions' },
+]
 
 export function NotificationsView() {
   const { address, isConnected } = useArcAccount()
@@ -19,6 +30,8 @@ export function NotificationsView() {
   // when no recipient field exists, so this is best-effort filtering.
   const { filterNotifications } = useSettings()
   const myNotifs = filterNotifications(filterNotificationsForAddress(notifications, address))
+  const [filter, setFilter] = useState<'all' | NotifType>('all')
+  const shown = filter === 'all' ? myNotifs : myNotifs.filter((n) => n.type === filter)
 
   useEffect(() => {
     if (isConnected) {
@@ -49,16 +62,39 @@ export function NotificationsView() {
         )}
       </div>
 
-      {myNotifs.length === 0 ? (
+      <div className="flex gap-2 overflow-x-auto px-4 py-3 no-scrollbar" role="tablist" aria-label="Notification types">
+        {FILTERS.map((f) => {
+          const count = f.id === 'all' ? myNotifs.length : myNotifs.filter((n) => n.type === f.id).length
+          const active = filter === f.id
+          return (
+            <button
+              key={f.id}
+              type="button"
+              role="tab"
+              aria-selected={active}
+              onClick={() => setFilter(f.id)}
+              className="h-10 flex-shrink-0 rounded-full px-4 text-sm font-semibold active:scale-95 transition-transform"
+              style={{
+                background: active ? 'var(--accent)' : 'var(--surface-muted)',
+                color: active ? 'var(--accent-ink, #fff)' : 'var(--ink)',
+                border: '1px solid var(--border)',
+              }}>
+              {f.label}{count > 0 ? ` ${count}` : ''}
+            </button>
+          )
+        })}
+      </div>
+
+      {shown.length === 0 ? (
         <EmptyState
           icon={<Check size={24} />}
-          title="All caught up"
-          description="New messages, payments, likes and follows will appear here"
+          title={filter === 'all' ? 'All caught up' : 'Nothing here yet'}
+          description={filter === 'all' ? 'New messages, payments, likes and follows will appear here' : 'New activity of this kind will appear here'}
         />
       ) : (
         <div>
-          {myNotifs.map((notif) => (
-            <NotifItem key={notif.id} notif={notif} />
+          {shown.map((notif) => (
+            <NotifItem key={notif.id} notif={notif} me={address} />
           ))}
         </div>
       )}
@@ -66,7 +102,9 @@ export function NotificationsView() {
   )
 }
 
-function NotifItem({ notif }: { notif: Notification }) {
+function NotifItem({ notif, me }: { notif: Notification; me?: string }) {
+  // Follower notices from before the server list existed only know a count, so no one is named.
+  const countOnly = notif.type === 'follow' && !!me && notif.fromAddress.toLowerCase() === me.toLowerCase()
   const { icon, color, text } = getNotifMeta(notif)
   // A message alert opens its chat when tapped.
   const opensChat = notif.type === 'message' && !!notif.targetId
@@ -94,7 +132,7 @@ function NotifItem({ notif }: { notif: Notification }) {
       </div>
       <div className="flex-1 min-w-0">
         <p className="text-sm" style={{ color: 'var(--ink)' }}>
-          {notif.type === 'follow' ? (
+          {countOnly ? (
             <span className="font-semibold">{notif.content ?? 'You have a new follower'}</span>
           ) : (
             <>
@@ -103,7 +141,7 @@ function NotifItem({ notif }: { notif: Notification }) {
             </>
           )}
         </p>
-        {notif.content && notif.type !== 'follow' && (
+        {notif.content && !countOnly && (
           <p className="text-xs mt-0.5 truncate" style={{ color: 'var(--muted)' }}>{notif.content}</p>
         )}
         <p className="text-xs mt-0.5" style={{ color: 'var(--subtle)' }}>

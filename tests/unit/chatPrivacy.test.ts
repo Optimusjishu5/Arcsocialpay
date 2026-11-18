@@ -22,6 +22,7 @@ type Handlers = {
   session: typeof import('../../app/api/auth/session/route')
   auth: typeof import('../../src/lib/chatAuth')
   sess: typeof import('../../lib/session')
+  follows: typeof import('../../app/api/follows/route')
 }
 let h: Handlers
 
@@ -83,6 +84,7 @@ beforeAll(async () => {
     session: await import('../../app/api/auth/session/route'),
     auth: await import('../../src/lib/chatAuth'),
     sess: await import('../../lib/session'),
+    follows: await import('../../app/api/follows/route'),
   }
   tokenA = await login(A)
   tokenB = await login(B)
@@ -290,5 +292,25 @@ describe('no wallet prompt per message', () => {
 
   test('a sign-in lasts weeks, so people sign in once per device', () => {
     expect(h.sess.SESSION_TTL_MS).toBeGreaterThanOrEqual(7 * 24 * 60 * 60 * 1000)
+  })
+})
+
+describe('followers', () => {
+  test('you only ever see your own followers, and the follower is always the signed-in wallet', async () => {
+    // B follows A. C tries to make A follow D by naming A: the request only ever acts as C.
+    expect((await h.follows.POST(req('/api/follows', 'POST', tokenB, { target: A.address, follow: true }))).status).toBe(200)
+    expect((await h.follows.POST(req('/api/follows', 'POST', tokenC, { target: A.address, follow: true }))).status).toBe(200)
+    const mineA = (await (await h.follows.GET(req('/api/follows', 'GET', tokenA))).json()) as { followers: { address: string }[] }
+    expect(mineA.followers.map((f) => f.address).sort()).toEqual([B.address.toLowerCase(), C.address.toLowerCase()].sort())
+    const mineB = (await (await h.follows.GET(req('/api/follows', 'GET', tokenB))).json()) as { followers: unknown[] }
+    expect(mineB.followers).toHaveLength(0)
+  })
+
+  test('unfollowing removes the follower, you cannot follow yourself, and a signed-out caller gets nothing', async () => {
+    expect((await h.follows.POST(req('/api/follows', 'POST', tokenC, { target: A.address, follow: false }))).status).toBe(200)
+    const mineA = (await (await h.follows.GET(req('/api/follows', 'GET', tokenA))).json()) as { followers: { address: string }[] }
+    expect(mineA.followers.map((f) => f.address)).toEqual([B.address.toLowerCase()])
+    expect((await h.follows.POST(req('/api/follows', 'POST', tokenA, { target: A.address, follow: true }))).status).toBe(400)
+    expect((await h.follows.GET(req('/api/follows', 'GET'))).status).toBe(401)
   })
 })
