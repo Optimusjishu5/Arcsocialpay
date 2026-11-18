@@ -1,8 +1,9 @@
 'use client'
 
-// Browser side of wallet sign-in for private chat data. The signed-in session lives in
-// sessionStorage (one tab, cleared when the tab closes) and always names a single wallet, so a
-// different wallet can never reuse it.
+// Browser side of wallet sign-in for private chat data. The signed-in session names a single wallet
+// and lasts a few hours, so a different wallet can never reuse it. It is kept in localStorage: phones
+// often reload or restore the tab while the wallet app is open, and sessionStorage would lose the
+// sign-in each time and ask again.
 
 import { useSyncExternalStore } from 'react'
 
@@ -26,6 +27,20 @@ export function setChatAuthState(next: ChatAuthState) {
   state = next
   listeners.forEach((l) => l())
 }
+/** Why the last sign-in did not finish, in plain words (shown under the sign-in notice). */
+let lastError = ''
+export function setChatAuthError(msg: string) {
+  if (lastError === msg) return
+  lastError = msg
+  listeners.forEach((l) => l())
+}
+export function useChatAuthError(): string {
+  return useSyncExternalStore(
+    (l) => { listeners.add(l); return () => { listeners.delete(l) } },
+    () => lastError,
+    () => '',
+  )
+}
 export function useChatAuthState(): ChatAuthState {
   return useSyncExternalStore(
     (l) => { listeners.add(l); return () => { listeners.delete(l) } },
@@ -40,24 +55,33 @@ export const registerSignInRetry = (fn: (() => void) | null) => { retry = fn }
 /** Starts (or restarts) the wallet sign-in. Call it from a tap so mobile wallets are allowed to open. */
 export const retrySignIn = () => retry?.()
 
+function store(): Storage | null {
+  try { return localStorage } catch { return null }
+}
+
 export function readSession(address: string, now = Date.now()): ChatSession | null {
-  try {
-    const raw = sessionStorage.getItem(KEY)
-    if (!raw) return null
-    const s = JSON.parse(raw) as ChatSession
-    if (!s || s.address !== address.toLowerCase() || typeof s.token !== 'string' || s.expiresAt - MARGIN_MS <= now) return null
-    return s
-  } catch {
-    return null
+  // An older version kept the session in sessionStorage; still honour it once.
+  for (const area of [store(), (() => { try { return sessionStorage } catch { return null } })()]) {
+    try {
+      const raw = area?.getItem(KEY)
+      if (!raw) continue
+      const s = JSON.parse(raw) as ChatSession
+      if (!s || s.address !== address.toLowerCase() || typeof s.token !== 'string' || s.expiresAt - MARGIN_MS <= now) continue
+      return s
+    } catch {
+      /* try the next place */
+    }
   }
+  return null
 }
 
 export function clearSession(): void {
+  try { localStorage.removeItem(KEY) } catch { /* storage unavailable */ }
   try { sessionStorage.removeItem(KEY) } catch { /* storage unavailable */ }
 }
 
 function saveSession(s: ChatSession): void {
-  try { sessionStorage.setItem(KEY, JSON.stringify(s)) } catch { /* storage unavailable */ }
+  try { store()?.setItem(KEY, JSON.stringify(s)) } catch { /* storage unavailable */ }
 }
 
 export type SignTyped = (args: {
@@ -82,11 +106,28 @@ export async function signIn(address: string, sign: SignTyped): Promise<ChatSess
   const res = await fetch('/api/auth/session', {
     method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ challenge, signature }),
   })
-  if (!res.ok) throw new Error('refused')
+  if (!res.ok) {
+    const j = (await res.json().catch(() => ({}))) as { error?: string }
+    throw new Error(res.status >= 500 || res.status === 503 ? 'unavailable' : `refused: ${j.error ?? 'the server did not accept the signature'}`)
+  }
   const j = (await res.json()) as { token: string; expiresAt: number; address: string }
   const session = { address: j.address.toLowerCase(), token: j.token, expiresAt: j.expiresAt }
   saveSession(session)
   return session
+}
+
+// One sign-in per wallet at a time. A phone often re-renders the page while the wallet app is open;
+// without this each re-render asked for another signature and threw the first one away.
+const inflight = new Map<string, Promise<ChatSession>>()
+
+/** Like signIn, but joins a sign-in that is already waiting for the wallet. `fresh` starts a new request. */
+export function signInOnce(address: string, sign: SignTyped, fresh = false): Promise<ChatSession> {
+  const key = address.toLowerCase()
+  const running = inflight.get(key)
+  if (running && !fresh) return running
+  const p = signIn(address, sign).finally(() => { if (inflight.get(key) === p) inflight.delete(key) })
+  inflight.set(key, p)
+  return p
 }
 
 /** fetch() with the session attached. A 401 drops the stored session so the next call signs in again. */

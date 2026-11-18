@@ -20,7 +20,7 @@ import { useAccount, useSignTypedData, useSwitchChain } from 'wagmi'
 import { appStore } from '@/store/appStore'
 import { ARC_CHAIN_ID } from '@/chains'
 import {
-  authedFetch, clearSession, readSession, registerSignInRetry, setChatAuthState, signIn,
+  authedFetch, clearSession, readSession, registerSignInRetry, setChatAuthError, setChatAuthState, signInOnce,
   type ChatSession, type SignTyped,
 } from '@/lib/chatSession'
 import type { Conversation, Message } from '@/types/index'
@@ -90,6 +90,10 @@ export function usePersistentChat(address: string | undefined) {
   // The wallet is only asked to sign when the person opens Messages or taps "Sign in", never on
   // connect: a surprise signature request on another screen is what mobile wallets tend to drop.
   const askFor = useRef<string | null>(null)
+  // Set by "Sign in" / "Ask again": start a brand new request instead of joining one that may be stuck.
+  const fresh = useRef(false)
+  const addressRef = useRef(address)
+  addressRef.current = address
 
   // 0) Sign in for this wallet. A new wallet always starts from nothing.
   useEffect(() => {
@@ -98,7 +102,7 @@ export function usePersistentChat(address: string | undefined) {
     setSession(null)
     if (!address) { setChatAuthState('off'); return }
     let cancelled = false
-    registerSignInRetry(() => { askFor.current = address.toLowerCase(); setAttempt((n) => n + 1) })
+    registerSignInRetry(() => { askFor.current = address.toLowerCase(); fresh.current = true; setAttempt((n) => n + 1) })
 
     void (async () => {
       let configured = false
@@ -115,19 +119,33 @@ export function usePersistentChat(address: string | undefined) {
       if (!s) {
         if (askFor.current !== address.toLowerCase()) { setChatAuthState('idle'); return }
         setChatAuthState('signing')
+        setChatAuthError('')
         const sign: SignTyped = async (args) => {
           // Wallets only sign typed data for the chain named in the request.
           if (chainRef.current !== ARC_CHAIN_ID) await switchChainAsync({ chainId: ARC_CHAIN_ID })
           return signTypedDataAsync(args as unknown as Parameters<typeof signTypedDataAsync>[0])
         }
+        const startFresh = fresh.current
+        fresh.current = false
         try {
-          s = await signIn(address, sign)
+          s = await signInOnce(address, sign, startFresh)
         } catch (e) {
-          if (!cancelled) setChatAuthState(String((e as Error)?.message) === 'unavailable' ? 'unavailable' : 'declined')
+          // The page can re-render while the wallet app is open; only report for the wallet still connected.
+          if (addressRef.current?.toLowerCase() !== address.toLowerCase()) return
+          const raw = String((e as { shortMessage?: string; message?: string })?.shortMessage ?? (e as Error)?.message ?? '')
+          const code = (e as { code?: number })?.code
+          if (raw === 'unavailable') { setChatAuthState('unavailable'); return }
+          setChatAuthError(
+            code === 4001 || /reject|denied|cancel/i.test(raw) ? 'The request was cancelled in your wallet.'
+              : raw.startsWith('refused: ') ? raw.slice('refused: '.length)
+              : raw.slice(0, 140) || 'The wallet did not return a signature.',
+          )
+          setChatAuthState('declined')
           return
         }
       }
-      if (cancelled) return
+      // Apply the result even if this run was replaced meanwhile, as long as the same wallet is connected.
+      if (addressRef.current?.toLowerCase() !== address.toLowerCase()) return
       setChatAuthState('ready')
       setSession(s)
     })()
@@ -144,6 +162,7 @@ export function usePersistentChat(address: string | undefined) {
     if (res.status !== 401) return false
     clearSession()
     setSession(null)
+    setChatAuthError('Your sign-in expired. Sign in again to continue.')
     setChatAuthState('declined')
     return true
   }

@@ -12,7 +12,7 @@ import { useSocialPay } from '../hooks/useSocialPay'
 import { useChatSigning } from '../hooks/useChatSigning'
 import { GradientIcon, toneStyle, toneVars } from './dashboard/ui'
 import { appStore, useAppStore } from '../store/appStore'
-import { retrySignIn, useChatAuthState } from '../lib/chatSession'
+import { retrySignIn, useChatAuthError, useChatAuthState } from '../lib/chatSession'
 import { Avatar } from './ui/Avatar'
 import { Button } from './ui/Button'
 import { Modal } from './ui/Modal'
@@ -36,6 +36,7 @@ interface Props {
 /** Shown only when chats are kept on the server and this wallet has not signed in yet. */
 function ChatSignInNotice() {
   const state = useChatAuthState()
+  const detail = useChatAuthError()
   const [slow, setSlow] = useState(false)
 
   // If the wallet never shows the request, offer a way to ask again instead of waiting forever.
@@ -56,7 +57,10 @@ function ChatSignInNotice() {
   return (
     <div className="mx-3 mb-2 flex items-center gap-3 rounded-2xl px-3 py-3 text-xs" style={{ background: 'var(--surface-muted)', color: 'var(--ink-2)', border: '1px solid var(--border)' }} role="status" aria-live="polite">
       {signing && !slow && <Loader2 size={16} className="flex-shrink-0 animate-spin" style={{ color: 'var(--tone-text, var(--accent))' }} aria-hidden />}
-      <span className="flex-1 leading-snug">{text}</span>
+      <span className="flex-1 leading-snug">
+        {text}
+        {state === 'declined' && detail && <span className="mt-1 block" style={{ color: 'var(--subtle)' }}>{detail}</span>}
+      </span>
       {action && (
         <button onClick={retrySignIn} className="h-11 flex-shrink-0 rounded-full px-4 text-sm font-semibold active:scale-95 transition-transform"
           style={toneStyle('violet')}>

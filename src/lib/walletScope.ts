@@ -11,16 +11,24 @@ import { clearSession, setChatAuthState } from './chatSession'
 
 let installed = false
 
+// Phone wallets drop and restore the connection for a moment when you switch to the wallet app to
+// sign. Chats leave the screen at once, but the saved sign-in only ends if the wallet stays gone;
+// otherwise you would be asked to sign again right after signing. Disconnecting with the app's own
+// button ends the sign-in immediately.
+const SIGN_IN_GRACE_MS = 2 * 60_000
+let graceTimer: ReturnType<typeof setTimeout> | null = null
+
 function apply(status: string, address: string | undefined) {
   if (status === 'connected' && address) {
+    if (graceTimer) { clearTimeout(graceTimer); graceTimer = null }
     appStore.setActiveWallet(address)
     return
   }
-  // Disconnected (or switching): show nothing private and drop the sign-in for the old wallet.
+  // Disconnected (or switching): show nothing private.
   if (status === 'disconnected') {
     appStore.setActiveWallet(null)
-    clearSession()
     setChatAuthState('off')
+    if (!graceTimer) graceTimer = setTimeout(() => { graceTimer = null; clearSession() }, SIGN_IN_GRACE_MS)
   }
 }
 

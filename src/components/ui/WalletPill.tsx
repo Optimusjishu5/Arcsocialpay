@@ -6,11 +6,14 @@ import { toast } from 'sonner'
 import { useDisconnect } from 'wagmi'
 import { Avatar } from './Avatar'
 import { formatAddress } from '../../utils/format'
+import { clearSession } from '../../lib/chatSession'
 
 /** Disconnects the wallet in one tap, with a toast so it is clear it worked. */
 export function useQuickDisconnect() {
   const { disconnect } = useDisconnect()
   return () => {
+    // Leaving on purpose also ends the chat sign-in right away.
+    clearSession()
     disconnect()
     toast.success('Wallet disconnected', { duration: 1800 })
   }
