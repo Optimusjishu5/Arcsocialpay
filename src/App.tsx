@@ -17,6 +17,7 @@ import {
 import type { PayMode } from './components/PayView'
 import { DesktopNav, DesktopTopBar, MobileNav, MobileTopBar } from './components/Navigation'
 import { parsePayPrefill } from './utils/payRequests'
+import { OPEN_CHAT_EVENT } from './lib/incomingAlerts'
 import type { NavView } from './types/index'
 
 const VIEW_TITLES: Record<NavView, string> = {
@@ -115,6 +116,21 @@ export default function App() {
   }, [nav.view])
   useEffect(() => prefetchAllViews(), [])
 
+  // Tapping a message alert (toast or system notification) opens that chat.
+  useEffect(() => {
+    const open = (convId: unknown) => {
+      if (typeof convId === 'string' && convId) { setNav({ view: 'messages', extra: { convId } }); window.scrollTo({ top: 0, behavior: 'auto' }) }
+    }
+    const onEvent = (e: Event) => open((e as CustomEvent<{ convId?: string }>).detail?.convId)
+    const onWorker = (e: MessageEvent<{ type?: string; convId?: unknown } | null>) => { if (e.data?.type === OPEN_CHAT_EVENT) open(e.data.convId) }
+    window.addEventListener(OPEN_CHAT_EVENT, onEvent)
+    navigator.serviceWorker?.addEventListener('message', onWorker)
+    return () => {
+      window.removeEventListener(OPEN_CHAT_EVENT, onEvent)
+      navigator.serviceWorker?.removeEventListener('message', onWorker)
+    }
+  }, [])
+
   function navigate(view: NavView, extra?: Record<string, string>) {
     setNav({ view, extra })
     // Jump to the top at once: a smooth scroll makes every tap feel slow.
@@ -128,7 +144,7 @@ export default function App() {
       case 'home':
         return <Dashboard onNavigate={navigate} />
       case 'messages':
-        return <MessagesView initialConvId={nav.extra?.convId} />
+        return <MessagesView key={nav.extra?.convId ?? 'list'} initialConvId={nav.extra?.convId} />
       case 'pay':
         return (
           <PayView

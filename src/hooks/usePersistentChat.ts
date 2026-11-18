@@ -23,6 +23,7 @@ import {
   authedFetch, clearSession, readSession, registerSignInRetry, setChatAuthError, setChatAuthState, signInOnce,
   type ChatSession, type SignTyped,
 } from '@/lib/chatSession'
+import { announceMessage, isViewing, loadSeen, saveSeen } from '@/lib/incomingAlerts'
 import type { Conversation, Message } from '@/types/index'
 
 async function safeJson(res: Response): Promise<Record<string, unknown>> {
@@ -77,6 +78,18 @@ function toMessage(raw: unknown): Message | null {
   }
 }
 
+/** True the first time this wallet needs a sign-in in this tab. Later the person asks with the "Sign in" button. */
+function firstAsk(address: string): boolean {
+  const key = `socialpay:signin-asked:${address.toLowerCase()}`
+  try {
+    if (sessionStorage.getItem(key)) return false
+    sessionStorage.setItem(key, '1')
+  } catch {
+    /* storage unavailable: ask once per page load */
+  }
+  return true
+}
+
 export function usePersistentChat(address: string | undefined) {
   const { chainId } = useAccount()
   const { signTypedDataAsync } = useSignTypedData()
@@ -87,8 +100,8 @@ export function usePersistentChat(address: string | undefined) {
   const postedMsgs = useRef<Set<string>>(new Set())
   const chainRef = useRef(chainId)
   chainRef.current = chainId
-  // The wallet is only asked to sign when the person opens Messages or taps "Sign in", never on
-  // connect: a surprise signature request on another screen is what mobile wallets tend to drop.
+  // The wallet signs in once, right after it connects, and the sign-in then lasts weeks on this device.
+  // Messages never ask again; "Sign in" only appears if that one request was declined or has expired.
   const askFor = useRef<string | null>(null)
   // Set by "Sign in" / "Ask again": start a brand new request instead of joining one that may be stuck.
   const fresh = useRef(false)
@@ -117,7 +130,8 @@ export function usePersistentChat(address: string | undefined) {
 
       let s = readSession(address)
       if (!s) {
-        if (askFor.current !== address.toLowerCase()) { setChatAuthState('idle'); return }
+        // Signing in happens right after the wallet connects, once. If it is declined it is not repeated on its own.
+        if (askFor.current !== address.toLowerCase() && !firstAsk(address)) { setChatAuthState('idle'); return }
         setChatAuthState('signing')
         setChatAuthError('')
         const sign: SignTyped = async (args) => {
@@ -302,6 +316,10 @@ export function usePersistentChat(address: string | undefined) {
     let inFlight = false
     let cancelled = false
     const stale = () => cancelled || appStore.getActiveWallet() !== me
+    // Messages already announced for this wallet (kept on the device, so a reload does not repeat them).
+    const seen = loadSeen(me) ?? new Set<string>()
+    let baseline = loadSeen(me) === null
+    let seenChanged = false
 
     const tick = () => {
       if (disabled || inFlight || stale()) return
@@ -342,24 +360,39 @@ export function usePersistentChat(address: string | undefined) {
                 ? (msgJson.messages as unknown[]).map(toMessage).filter((m): m is Message => !!m)
                 : []
               if (msgs.length === 0) continue
-              const fresh = msgs.filter((m) => !postedMsgs.current.has(m.id))
               appStore.importMessages(id, msgs, me)
               for (const m of msgs) postedMsgs.current.add(m.id)
-              const inbound = fresh.filter((m) => m.senderAddress.toLowerCase() !== me)
+              const inbound = msgs.filter((m) => m.senderAddress.toLowerCase() !== me)
               if (inbound.length === 0) continue
-              for (const m of inbound) appStore.bumpConversationUnread(m.conversationId)
-              const latest = inbound[inbound.length - 1]
+              // The very first pass for a wallet only records what is already there, so old chats do not all ring at once.
+              if (baseline) {
+                for (const m of inbound) seen.add(m.id)
+                seenChanged = true
+                continue
+              }
+              const fresh = inbound.filter((m) => !seen.has(m.id))
+              if (fresh.length === 0) continue
+              for (const m of fresh) seen.add(m.id)
+              seenChanged = true
+              // Already looking at this chat: no alert, just keep it read.
+              if (isViewing(id)) { appStore.markConversationRead(id); continue }
+              for (let i = 0; i < fresh.length; i++) appStore.bumpConversationUnread(id)
+              const latest = fresh[fresh.length - 1]
+              const preview = latest.paymentTx ? `Sent you ${latest.paymentTx.amount} USDC` : latest.content.slice(0, 120)
+              announceMessage({ convId: id, from: latest.senderAddress, preview, count: fresh.length })
               appStore.addNotification({
                 type: 'message',
                 fromAddress: latest.senderAddress,
                 targetId: id,
-                content: latest.content.slice(0, 120),
+                content: preview,
                 createdAt: Date.now(),
               })
             } catch {
               // per-conv failure must not break other convs
             }
           }
+          // A whole pass finished: remember what was seen, and stop treating messages as "already there".
+          if (!stale() && (seenChanged || baseline)) { saveSeen(me, seen); seenChanged = false; baseline = false }
         } catch {
           // offline / server down — retry on next tick
         } finally {
@@ -370,9 +403,15 @@ export function usePersistentChat(address: string | undefined) {
 
     tick()
     const iv = setInterval(tick, 4000)
+    // Coming back to the app (or the phone waking up) checks for new messages straight away.
+    const wake = () => { if (document.visibilityState === 'visible') tick() }
+    document.addEventListener('visibilitychange', wake)
+    window.addEventListener('online', wake)
     return () => {
       cancelled = true
       clearInterval(iv)
+      document.removeEventListener('visibilitychange', wake)
+      window.removeEventListener('online', wake)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [address, session])

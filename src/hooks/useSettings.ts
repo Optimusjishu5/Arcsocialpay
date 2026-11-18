@@ -73,6 +73,11 @@ function save(patch: Stored) {
   listeners.forEach((l) => l())
 }
 
+/** The current notification switches, for code that runs outside React (such as the message poller). */
+export function getNotifRules(): NotifRules {
+  return parseRules(readRaw())
+}
+
 export function useSettings() {
   const raw = useSyncExternalStore(subscribe, readRaw, () => '')
   const rules = useMemo(() => parseRules(raw), [raw])

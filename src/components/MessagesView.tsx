@@ -2,17 +2,17 @@ import { useState, useRef, useEffect } from 'react'
 import { toast } from 'sonner'
 import {
   Search, Plus, Send, ArrowLeft, Reply, Trash2, DollarSign, X,
-  CheckCheck, Clock, AlertCircle, MessageSquare, Loader2
+  CheckCheck, Clock, AlertCircle, MessageSquare, Loader2, BellRing
 } from 'lucide-react'
 import { isAddress } from 'viem'
 import { useWaitForTransactionReceipt } from 'wagmi'
 import { ConnectKitButton } from 'connectkit'
 import { useArcAccount, useUsdcBalance, useSendUsdc, ARC_CHAIN_ID, USDC_ADDRESS } from '../hooks/useArcWallet'
 import { useSocialPay } from '../hooks/useSocialPay'
-import { useChatSigning } from '../hooks/useChatSigning'
 import { GradientIcon, toneStyle, toneVars } from './dashboard/ui'
 import { appStore, useAppStore } from '../store/appStore'
 import { retrySignIn, useChatAuthError, useChatAuthState } from '../lib/chatSession'
+import { deviceAlertsState, enableDeviceAlerts, setViewingConversation, type DeviceAlerts } from '../lib/incomingAlerts'
 import { Avatar } from './ui/Avatar'
 import { Button } from './ui/Button'
 import { Modal } from './ui/Modal'
@@ -71,19 +71,36 @@ function ChatSignInNotice() {
   )
 }
 
+/** One tap to allow system alerts for new messages. Hidden once answered or when the browser has none. */
+function MessageAlertsChip() {
+  // The app is drawn in the browser only, so the permission can be read straight away.
+  const [state, setState] = useState<DeviceAlerts>(() => deviceAlertsState())
+  if (state !== 'default') return null
+  return (
+    <button
+      type="button"
+      onClick={() => { void enableDeviceAlerts().then((r) => { setState(r); if (r === 'granted') toast.success('Message alerts are on') }) }}
+      className="mx-3 mb-2 flex h-11 items-center gap-2 rounded-2xl px-3 text-sm font-semibold active:scale-[0.98] transition-transform"
+      style={{ background: 'var(--surface-muted)', border: '1px solid var(--border)', color: 'var(--ink)' }}
+    >
+      <BellRing size={16} aria-hidden style={{ color: 'var(--tone-text, var(--accent))' }} />
+      Turn on alerts for new messages
+    </button>
+  )
+}
+
 export function MessagesView({ initialConvId }: Props) {
   const { address, isConnected } = useArcAccount()
   const { conversations, messages } = useAppStore()
   const [activeConvId, setActiveConvId] = useState<string | null>(initialConvId ?? null)
   const [search, setSearch] = useState('')
   const [showNewChat, setShowNewChat] = useState(false)
-  const authState = useChatAuthState()
 
-  // Opening Messages is the moment to ask for the free sign-in, once per visit.
-  const asked = useRef(false)
+  // Tell the alert system which chat is open, so messages in it do not ring.
   useEffect(() => {
-    if (isConnected && authState === 'idle' && !asked.current) { asked.current = true; retrySignIn() }
-  }, [isConnected, authState])
+    setViewingConversation(activeConvId)
+    return () => setViewingConversation(null)
+  }, [activeConvId])
 
   // While a chat is open on a phone, the bottom tabs step aside so the message box is never covered.
   useEffect(() => {
@@ -156,6 +173,7 @@ export function MessagesView({ initialConvId }: Props) {
           </div>
         </div>
         <ChatSignInNotice />
+        <MessageAlertsChip />
         {/* List */}
         <div className="flex-1 overflow-y-auto">
           {myConvs.length === 0 ? (
@@ -267,7 +285,6 @@ function ChatPanel({ conv, myAddress, messages, onBack }: {
   const [replyTo, setReplyTo] = useState<Message | null>(null)
   const [showPayModal, setShowPayModal] = useState(false)
   const [sending, setSending] = useState(false)
-  const chatSigning = useChatSigning()
   const bottomRef = useRef<HTMLDivElement>(null)
   const scrollRef = useRef<HTMLDivElement>(null)
 
@@ -292,16 +309,12 @@ function ChatPanel({ conv, myAddress, messages, onBack }: {
     if (!text || sending) return
     setSending(true)
     try {
-      // With server history on, the wallet signs each message so nobody can post as you.
-      const signed = chatSigning.required
-        ? await chatSigning.sign({ conversationId: conv.id, sender: myAddress, content: text, replyToId: replyTo?.id })
-        : undefined
-      appStore.sendMessage(conv.id, myAddress, text, replyTo?.id, undefined, signed)
+      // No wallet prompt: signing in once already proves the wallet, and the server saves the message under it.
+      appStore.sendMessage(conv.id, myAddress, text, replyTo?.id)
       setInput('')
       setReplyTo(null)
-    } catch (e) {
-      const msg = String((e as { message?: string })?.message ?? '').toLowerCase()
-      toast.error(msg.includes('reject') || msg.includes('denied') ? 'Signature cancelled. Message not sent.' : 'Could not sign the message. Please try again.')
+    } catch {
+      toast.error('Could not send the message. Please try again.')
     } finally {
       setSending(false)
     }
@@ -398,11 +411,6 @@ function ChatPanel({ conv, myAddress, messages, onBack }: {
           <Send size={18} />
         </button>
       </div>
-      {chatSigning.required && (
-        <p className="px-4 pb-2 text-[11px] flex-shrink-0" style={{ color: 'var(--subtle)', background: 'var(--surface-strong)' }}>
-          Messages are signed with your wallet so they can be verified as yours.
-        </p>
-      )}
 
       {/* In-chat pay modal */}
       <InChatPayModal

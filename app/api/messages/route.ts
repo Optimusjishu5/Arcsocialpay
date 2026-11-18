@@ -91,9 +91,12 @@ export async function POST(req: Request) {
     }
     const txHash = typeof body.paymentTx?.txHash === 'string' ? body.paymentTx.txHash : ''
     const createdAt = body.createdAt ?? Date.now()
-    let authentic = false
-    if (body.signature && /^0x[0-9a-fA-F]+$/.test(body.signature)) {
-      authentic = await verifyChatSignature(
+    // The wallet already proved itself once when it signed in, and the session names the sender, so a
+    // message needs no signature of its own. If one is attached it must still be valid for this sender.
+    let authentic = true
+    let signed = false
+    if (body.signature) {
+      signed = authentic = /^0x[0-9a-fA-F]+$/.test(body.signature) && await verifyChatSignature(
         {
           id: body.id, conversationId: body.conversationId, sender: body.senderAddress,
           content, createdAt, replyToId: body.replyToId, paymentTxHash: txHash || undefined,
@@ -101,10 +104,12 @@ export async function POST(req: Request) {
         body.signature as `0x${string}`,
       )
     }
-    // Payment cards without a signature are accepted only when the transaction itself came from the sender.
-    if (!authentic && txHash) authentic = await paymentSentBy(txHash, body.senderAddress)
     if (!authentic) {
-      return NextResponse.json({ error: 'Message signature is missing or invalid' }, { status: 401 })
+      return NextResponse.json({ error: 'Message signature is invalid' }, { status: 401 })
+    }
+    // A payment card claims a transaction, so that transaction must really come from the sender.
+    if (txHash && !signed && !(await paymentSentBy(txHash, body.senderAddress))) {
+      return NextResponse.json({ error: 'Payment card does not match a transaction from this wallet' }, { status: 401 })
     }
     await insertMessage({
       id: body.id,

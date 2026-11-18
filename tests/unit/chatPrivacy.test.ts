@@ -267,3 +267,28 @@ describe('groups', () => {
     expect((await h.msg.GET(req('/api/messages?conversationId=' + GROUP, 'GET', tokenC))).status).toBe(404)
   })
 })
+
+// Kept last: these add messages, and the earlier tests check what the newest message in the chat is.
+describe('no wallet prompt per message', () => {
+  test('a message needs no signature of its own: the sign-in already names the sender', async () => {
+    const id = 'nosig' + Date.now()
+    const res = await h.msg.POST(req('/api/messages', 'POST', tokenA, { id, conversationId: DM, senderAddress: A.address, content: 'no prompt needed', createdAt: Date.now() }))
+    expect(res.status).toBe(200)
+    const all = (await (await h.msg.GET(req('/api/messages?conversationId=' + DM, 'GET', tokenB))).json()) as { messages: { content: string }[] }
+    expect(all.messages.some((m) => m.content === 'no prompt needed')).toBe(true)
+  })
+
+  test('without a signature, someone else still cannot send as you, and a fake payment card is refused', async () => {
+    const spoof = await h.msg.POST(req('/api/messages', 'POST', tokenC, { id: 'ns2' + Date.now(), conversationId: DM, senderAddress: A.address, content: 'x', createdAt: Date.now() }))
+    expect(spoof.status).toBe(403)
+    const fake = await h.msg.POST(req('/api/messages', 'POST', tokenA, {
+      id: 'ns3' + Date.now(), conversationId: DM, senderAddress: A.address, content: '', createdAt: Date.now(),
+      paymentTx: { txHash: '0x' + '12'.repeat(32), amount: '5', status: 'confirmed' },
+    }))
+    expect(fake.status).toBe(401)
+  })
+
+  test('a sign-in lasts weeks, so people sign in once per device', () => {
+    expect(h.sess.SESSION_TTL_MS).toBeGreaterThanOrEqual(7 * 24 * 60 * 60 * 1000)
+  })
+})

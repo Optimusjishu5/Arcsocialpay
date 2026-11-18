@@ -12,7 +12,8 @@
 import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto'
 
 const CHALLENGE_TTL_MS = 5 * 60 * 1000
-export const SESSION_TTL_MS = 12 * 60 * 60 * 1000
+// Long enough that people sign in once per device, not every day. It names one wallet only.
+export const SESSION_TTL_MS = 30 * 24 * 60 * 60 * 1000
 
 /** Secret for signing challenges and sessions. Set CHAT_SESSION_SECRET; falls back to a key derived from the database token. */
 function secret(): Buffer | null {
