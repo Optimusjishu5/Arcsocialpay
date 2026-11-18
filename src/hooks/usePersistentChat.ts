@@ -78,6 +78,10 @@ function toMessage(raw: unknown): Message | null {
   }
 }
 
+const BASELINE_QUIET_MS = 24 * 60 * 60 * 1000
+/** Fired to ask for an immediate check for new messages. */
+export const POLL_NOW_EVENT = 'socialpay:poll-now'
+
 /** True the first time this wallet needs a sign-in in this tab. Later the person asks with the "Sign in" button. */
 function firstAsk(address: string): boolean {
   const key = `socialpay:signin-asked:${address.toLowerCase()}`
@@ -364,11 +368,10 @@ export function usePersistentChat(address: string | undefined) {
               for (const m of msgs) postedMsgs.current.add(m.id)
               const inbound = msgs.filter((m) => m.senderAddress.toLowerCase() !== me)
               if (inbound.length === 0) continue
-              // The very first pass for a wallet only records what is already there, so old chats do not all ring at once.
+              // The very first pass for a wallet quietly records anything older than a day, so old chats do not
+              // all ring at once. Messages from the last day still show up as new.
               if (baseline) {
-                for (const m of inbound) seen.add(m.id)
-                seenChanged = true
-                continue
+                for (const m of inbound) if (Date.now() - m.createdAt > BASELINE_QUIET_MS) { seen.add(m.id); seenChanged = true }
               }
               const fresh = inbound.filter((m) => !seen.has(m.id))
               if (fresh.length === 0) continue
@@ -406,11 +409,14 @@ export function usePersistentChat(address: string | undefined) {
     // Coming back to the app (or the phone waking up) checks for new messages straight away.
     const wake = () => { if (document.visibilityState === 'visible') tick() }
     document.addEventListener('visibilitychange', wake)
+    // The Notifications screen asks for a fresh check when it opens.
+    window.addEventListener(POLL_NOW_EVENT, wake)
     window.addEventListener('online', wake)
     return () => {
       cancelled = true
       clearInterval(iv)
       document.removeEventListener('visibilitychange', wake)
+      window.removeEventListener(POLL_NOW_EVENT, wake)
       window.removeEventListener('online', wake)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps

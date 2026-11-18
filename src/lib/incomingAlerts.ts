@@ -86,9 +86,9 @@ export async function enableDeviceAlerts(): Promise<DeviceAlerts> {
   return result
 }
 
-async function systemNotice(title: string, body: string, convId: string) {
+async function systemNotice(title: string, body: string, convId: string, tag = `chat-${convId}`) {
   if (deviceAlertsState() !== 'granted' || document.visibilityState === 'visible') return
-  const options = { body, tag: `chat-${convId}`, icon: '/icon-64.png', data: { convId } }
+  const options = { body, tag, icon: '/icon-64.png', data: { convId } }
   const reg = await registration()
   try {
     if (reg) { await reg.showNotification(title, options); return }
@@ -123,4 +123,21 @@ export function announceMessage(m: IncomingMessage): boolean {
   if (document.visibilityState !== 'visible') setTitleBadge(unseen + m.count)
   void systemNotice(name, body, m.convId)
   return true
+}
+
+// ── Other notices: payments, likes, comments, mentions, followers ─────────
+
+export const OPEN_VIEW_EVENT = 'socialpay:open-view'
+
+/** Shows a toast, buzz, title badge and (if allowed) a system notification for any non-message notice. */
+export function announceNotice(title: string, body: string, enabled: boolean): void {
+  if (!enabled) return
+  toast(title, {
+    description: body || undefined,
+    duration: 6000,
+    action: { label: 'View', onClick: () => window.dispatchEvent(new CustomEvent(OPEN_VIEW_EVENT, { detail: { view: 'notifications' } })) },
+  })
+  try { navigator.vibrate?.(60) } catch { /* not supported */ }
+  if (document.visibilityState !== 'visible') setTitleBadge(unseen + 1)
+  void systemNotice(title, body, '', 'activity')
 }

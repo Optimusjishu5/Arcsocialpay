@@ -17,7 +17,8 @@ import {
 import type { PayMode } from './components/PayView'
 import { DesktopNav, DesktopTopBar, MobileNav, MobileTopBar } from './components/Navigation'
 import { parsePayPrefill } from './utils/payRequests'
-import { OPEN_CHAT_EVENT } from './lib/incomingAlerts'
+import { OPEN_CHAT_EVENT, OPEN_VIEW_EVENT } from './lib/incomingAlerts'
+import { useActivityNotices } from './hooks/useActivityNotices'
 import type { NavView } from './types/index'
 
 const VIEW_TITLES: Record<NavView, string> = {
@@ -105,6 +106,8 @@ export default function App() {
 
   // Persistent social feed: posts/comments/profiles, same Turso pattern.
   usePersistentSocial(address)
+  // Payments, likes, comments, mentions and followers become notifications and alerts.
+  useActivityNotices(address)
 
   // Persistent payment history: normal pay + tips render correctly everywhere.
   usePersistentTxHistory(address)
@@ -122,11 +125,16 @@ export default function App() {
       if (typeof convId === 'string' && convId) { setNav({ view: 'messages', extra: { convId } }); window.scrollTo({ top: 0, behavior: 'auto' }) }
     }
     const onEvent = (e: Event) => open((e as CustomEvent<{ convId?: string }>).detail?.convId)
+    const onView = (e: Event) => {
+      if ((e as CustomEvent<{ view?: string }>).detail?.view === 'notifications') { setNav({ view: 'notifications' }); window.scrollTo({ top: 0, behavior: 'auto' }) }
+    }
+    window.addEventListener(OPEN_VIEW_EVENT, onView)
     const onWorker = (e: MessageEvent<{ type?: string; convId?: unknown } | null>) => { if (e.data?.type === OPEN_CHAT_EVENT) open(e.data.convId) }
     window.addEventListener(OPEN_CHAT_EVENT, onEvent)
     navigator.serviceWorker?.addEventListener('message', onWorker)
     return () => {
       window.removeEventListener(OPEN_CHAT_EVENT, onEvent)
+      window.removeEventListener(OPEN_VIEW_EVENT, onView)
       navigator.serviceWorker?.removeEventListener('message', onWorker)
     }
   }, [])

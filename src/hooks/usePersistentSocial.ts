@@ -18,6 +18,7 @@ import { useEffect, useRef } from 'react'
 import { appStore } from '@/store/appStore'
 import type { Post, Comment, UserProfile } from '@/types/index'
 import { reconcileWithServer } from '@/utils/socialSync'
+import { SOCIAL_SYNCED_EVENT } from './useActivityNotices'
 
 /** A string field from untrusted JSON, or the fallback when it is not a string. */
 const str = (v: unknown, fallback = ''): string => (typeof v === 'string' ? v : fallback)
@@ -155,6 +156,7 @@ export function usePersistentSocial(address: string | undefined) {
       return false
     }
     applySnapshot.current(postJson, commentJson, profileJson, startedAt)
+    window.dispatchEvent(new Event(SOCIAL_SYNCED_EVENT))
     return true
   })
 

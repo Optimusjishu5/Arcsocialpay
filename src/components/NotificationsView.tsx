@@ -1,4 +1,6 @@
 import { useEffect } from 'react'
+import { POLL_NOW_EVENT } from '../hooks/usePersistentChat'
+import { OPEN_CHAT_EVENT } from '../lib/incomingAlerts'
 import { motion } from 'framer-motion'
 import { Heart, MessageCircle, Repeat2, UserPlus, DollarSign, AtSign, Check } from 'lucide-react'
 import { useArcAccount } from '../hooks/useArcWallet'
@@ -21,6 +23,8 @@ export function NotificationsView() {
   useEffect(() => {
     if (isConnected) {
       appStore.markNotificationsRead()
+      // Look for new messages right now, so the list is up to date when the bell is opened.
+      window.dispatchEvent(new Event(POLL_NOW_EVENT))
     }
   }, [isConnected])
 
@@ -49,7 +53,7 @@ export function NotificationsView() {
         <EmptyState
           icon={<Check size={24} />}
           title="All caught up"
-          description="Notifications about likes, follows, payments and more will appear here"
+          description="New messages, payments, likes and follows will appear here"
         />
       ) : (
         <div>
@@ -64,12 +68,19 @@ export function NotificationsView() {
 
 function NotifItem({ notif }: { notif: Notification }) {
   const { icon, color, text } = getNotifMeta(notif)
+  // A message alert opens its chat when tapped.
+  const opensChat = notif.type === 'message' && !!notif.targetId
+  const name = appStore.getProfile(notif.fromAddress)?.username || formatAddress(notif.fromAddress)
 
   return (
     <motion.div
       initial={{ opacity: 0, y: 4 }}
       animate={{ opacity: 1, y: 0 }}
-      className="flex items-start gap-3 px-4 py-3"
+      role={opensChat ? 'button' : undefined}
+      tabIndex={opensChat ? 0 : undefined}
+      onClick={opensChat ? () => window.dispatchEvent(new CustomEvent(OPEN_CHAT_EVENT, { detail: { convId: notif.targetId } })) : undefined}
+      onKeyDown={opensChat ? (e) => { if (e.key === 'Enter') window.dispatchEvent(new CustomEvent(OPEN_CHAT_EVENT, { detail: { convId: notif.targetId } })) } : undefined}
+      className={`flex items-start gap-3 px-4 py-3 ${opensChat ? 'cursor-pointer active:opacity-80' : ''}`}
       style={{
         borderBottom: '1px solid var(--border)',
         background: notif.read ? 'transparent' : 'var(--surface-muted)',
@@ -83,10 +94,16 @@ function NotifItem({ notif }: { notif: Notification }) {
       </div>
       <div className="flex-1 min-w-0">
         <p className="text-sm" style={{ color: 'var(--ink)' }}>
-          <span className="font-semibold">{formatAddress(notif.fromAddress)}</span>
-          {' '}{text}
+          {notif.type === 'follow' ? (
+            <span className="font-semibold">{notif.content ?? 'You have a new follower'}</span>
+          ) : (
+            <>
+              <span className="font-semibold">{name}</span>
+              {' '}{text}
+            </>
+          )}
         </p>
-        {notif.content && (
+        {notif.content && notif.type !== 'follow' && (
           <p className="text-xs mt-0.5 truncate" style={{ color: 'var(--muted)' }}>{notif.content}</p>
         )}
         <p className="text-xs mt-0.5" style={{ color: 'var(--subtle)' }}>
