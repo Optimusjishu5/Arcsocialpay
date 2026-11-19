@@ -1187,8 +1187,15 @@ export const appStore = {
     const postedLower = new Set([...(postedKeys ?? [])].map((k) => k.toLowerCase()))
     setState((s) => {
       const next: Record<string, UserProfile> = {}
+      // Two server rows for one wallet (older data) are merged, keeping whatever is filled in.
+      const merged = new Map<string, UserProfile>()
       for (const p of profiles) {
         if (!p || typeof p.address !== 'string') continue
+        const k = normalizeAddress(p.address)
+        const prev = merged.get(k)
+        merged.set(k, prev ? { ...p, avatarUrl: p.avatarUrl || prev.avatarUrl, bio: p.bio || prev.bio, accent: p.accent || prev.accent, username: p.username && !p.username.includes('...') ? p.username : prev.username } : p)
+      }
+      for (const p of merged.values()) {
         const key = normalizeAddress(p.address)
         const saved = justSaved.get(key.toLowerCase())
         const mine = saved !== undefined && Date.now() - saved < JUST_SAVED_MS ? s.profiles[key] : undefined

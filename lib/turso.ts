@@ -392,6 +392,16 @@ export async function ensureSocialSchema(): Promise<boolean> {
   } catch {
     /* column already exists */
   }
+  // Older versions stored some wallets under a mixed-case address, which later left two rows for one wallet
+  // (one with the picture, one without). Fold them into the lowercase row, keeping the one that has the picture.
+  try {
+    await db.execute(`UPDATE profiles SET address = lower(address)
+      WHERE address != lower(address) AND NOT EXISTS (SELECT 1 FROM profiles p2 WHERE p2.address = lower(profiles.address))`)
+    await db.execute(`DELETE FROM profiles
+      WHERE address != lower(address) AND EXISTS (SELECT 1 FROM profiles p2 WHERE p2.address = lower(profiles.address))`)
+  } catch {
+    /* best effort: the list below still merges duplicates */
+  }
   socialSchemaEnsured = true
   return true
 }
@@ -552,10 +562,12 @@ export async function listProfiles(limit = 500): Promise<DbProfile[]> {
   }))
 }
 
-export async function upsertProfile(profile: DbProfile): Promise<void> {
+export async function upsertProfile(input: DbProfile): Promise<void> {
   const db = getTursoClient()
   if (!db) return
   await ensureSocialSchema()
+  // One row per wallet: addresses are always stored in lowercase, whatever case the caller used.
+  const profile = { ...input, address: input.address.toLowerCase() }
   await db.execute({
     sql: `INSERT INTO profiles (address, username, bio, avatar_seed, follower_count, following_count, created_at)
           VALUES (?, ?, ?, ?, ?, ?, ?)

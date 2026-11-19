@@ -372,3 +372,19 @@ describe('profile picture', () => {
     expect((await h.profMe.POST(req('/api/profiles/me', 'POST', tokenA, edit(A, other)))).status).toBe(400)
   })
 })
+
+describe('one profile row per wallet', () => {
+  const PNG = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg=='
+
+  test('a profile created by the background sync under a mixed-case address does not hide the saved picture', async () => {
+    // The app first records every known profile (checksummed address, no picture), then the person saves a picture.
+    await h.profiles.POST(req('/api/profiles', 'POST', undefined, { address: D.address, username: '0x1234...abcd', bio: '', avatarSeed: D.address, createdAt: 1 }))
+    const tokenD = await login(D)
+    expect((await h.profMe.POST(req('/api/profiles/me', 'POST', tokenD, { address: D.address, username: 'dora_pic', bio: '', avatarUrl: PNG, accent: 'rose' }))).status).toBe(200)
+    const list = (await (await h.profiles.GET(req('/api/profiles', 'GET'))).json()) as { profiles: { address: string; username: string; avatarUrl: string }[] }
+    const rows = list.profiles.filter((p) => p.address.toLowerCase() === D.address.toLowerCase())
+    expect(rows).toHaveLength(1)
+    expect(rows[0].username).toBe('dora_pic')
+    expect(rows[0].avatarUrl).toMatch(/^\/api\/avatar\?a=/)
+  })
+})
