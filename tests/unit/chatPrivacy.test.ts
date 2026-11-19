@@ -23,6 +23,9 @@ type Handlers = {
   auth: typeof import('../../src/lib/chatAuth')
   sess: typeof import('../../lib/session')
   follows: typeof import('../../app/api/follows/route')
+  profMe: typeof import('../../app/api/profiles/me/route')
+  profiles: typeof import('../../app/api/profiles/route')
+  avatar: typeof import('../../app/api/avatar/route')
 }
 let h: Handlers
 
@@ -85,6 +88,9 @@ beforeAll(async () => {
     auth: await import('../../src/lib/chatAuth'),
     sess: await import('../../lib/session'),
     follows: await import('../../app/api/follows/route'),
+    profMe: await import('../../app/api/profiles/me/route'),
+    profiles: await import('../../app/api/profiles/route'),
+    avatar: await import('../../app/api/avatar/route'),
   }
   tokenA = await login(A)
   tokenB = await login(B)
@@ -331,5 +337,38 @@ describe('follow counts and lists', () => {
     const mine = (await (await h.follows.GET(req('/api/follows', 'GET', tokenA))).json()) as { following: string[]; followers: unknown[] }
     expect(mine.following).toEqual([B.address.toLowerCase()])
     expect((await h.follows.GET(req('/api/follows?address=nope', 'GET', tokenA))).status).toBe(400)
+  })
+})
+
+describe('profile picture', () => {
+  const PNG = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg=='
+  const edit = (account: typeof A, avatarUrl: string, username = 'alice_pic') => ({ address: account.address, username, bio: 'hi', avatarUrl, accent: 'violet' })
+
+  test('a signed-in wallet sets its picture without another signature, and it is served as a normal image', async () => {
+    expect((await h.profMe.POST(req('/api/profiles/me', 'POST', tokenA, edit(A, PNG)))).status).toBe(200)
+    const list = (await (await h.profiles.GET(req('/api/profiles', 'GET'))).json()) as { profiles: { address: string; avatarUrl: string }[] }
+    const mine = list.profiles.find((p) => p.address.toLowerCase() === A.address.toLowerCase())
+    expect(mine?.avatarUrl).toMatch(/^\/api\/avatar\?a=0x[0-9a-f]{40}&v=\d+$/)
+    const img = await h.avatar.GET(req(mine!.avatarUrl, 'GET'))
+    expect(img.status).toBe(200)
+    expect(img.headers.get('content-type')).toBe('image/png')
+    expect(img.headers.get('cache-control')).toContain('immutable')
+    expect(Buffer.from(await img.arrayBuffer()).toString('base64')).toBe(PNG.split(',')[1])
+  })
+
+  test('saving other fields with the picture link keeps the current picture; removing it clears it', async () => {
+    const list = (await (await h.profiles.GET(req('/api/profiles', 'GET'))).json()) as { profiles: { address: string; avatarUrl: string }[] }
+    const link = list.profiles.find((p) => p.address.toLowerCase() === A.address.toLowerCase())!.avatarUrl
+    expect((await h.profMe.POST(req('/api/profiles/me', 'POST', tokenA, { ...edit(A, link), bio: 'new bio' }))).status).toBe(200)
+    expect((await h.avatar.GET(req(link, 'GET'))).status).toBe(200)
+    expect((await h.profMe.POST(req('/api/profiles/me', 'POST', tokenA, edit(A, '')))).status).toBe(200)
+    expect((await h.avatar.GET(req(link, 'GET'))).status).toBe(404)
+  })
+
+  test('nobody can change another wallet\'s picture, and links to someone else\'s picture are not accepted', async () => {
+    expect((await h.profMe.POST(req('/api/profiles/me', 'POST', tokenC, edit(A, PNG, 'mallory_x')))).status).toBeGreaterThanOrEqual(400)
+    expect((await h.profMe.POST(req('/api/profiles/me', 'POST', undefined, edit(A, PNG, 'mallory_y')))).status).toBeGreaterThanOrEqual(400)
+    const other = `/api/avatar?a=${B.address.toLowerCase()}&v=1`
+    expect((await h.profMe.POST(req('/api/profiles/me', 'POST', tokenA, edit(A, other)))).status).toBe(400)
   })
 })

@@ -1,5 +1,5 @@
 import { getAvatarColor, getInitials, formatAddress } from '../../utils/format'
-import { appStore } from '../../store/appStore'
+import { useProfile } from '../../store/appStore'
 
 interface AvatarProps {
   address: string
@@ -9,7 +9,7 @@ interface AvatarProps {
 }
 
 export function Avatar({ address, size = 36, className = '', showRing = false }: AvatarProps) {
-  const profile = appStore.getProfile(address)
+  const profile = useProfile(address)
   const name = profile?.username ?? formatAddress(address)
   const seed = profile?.avatarSeed ?? address
   const color = getAvatarColor(seed)

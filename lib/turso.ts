@@ -386,6 +386,12 @@ export async function ensureSocialSchema(): Promise<boolean> {
       /* column already exists */
     }
   }
+  // When the picture last changed: it makes the picture's web address change, so browsers cache it safely.
+  try {
+    await db.execute(`ALTER TABLE profiles ADD COLUMN avatar_v INTEGER NOT NULL DEFAULT 0`)
+  } catch {
+    /* column already exists */
+  }
   socialSchemaEnsured = true
   return true
 }
@@ -537,7 +543,8 @@ export async function listProfiles(limit = 500): Promise<DbProfile[]> {
     username: String(row.username ?? ''),
     bio: String(row.bio ?? ''),
     avatarSeed: String(row.avatar_seed ?? ''),
-    avatarUrl: String(row.avatar_url ?? ''),
+    // The picture itself is served from /api/avatar (small, cached); the list only carries its address.
+    avatarUrl: row.avatar_url ? avatarLink(String(row.address), Number(row.avatar_v ?? 0)) : '',
     accent: String(row.accent ?? ''),
     followerCount: Number(row.follower_count ?? 0),
     followingCount: Number(row.following_count ?? 0),
@@ -597,9 +604,24 @@ export async function updateProfileIdentity(p: {
             username=excluded.username,
             bio=excluded.bio,
             avatar_url=excluded.avatar_url,
+            avatar_v=CASE WHEN avatar_url = excluded.avatar_url THEN avatar_v ELSE ? END,
             accent=excluded.accent`,
-    args: [p.address, p.username, p.bio, p.address, p.avatarUrl, p.accent, Date.now()],
+    args: [p.address, p.username, p.bio, p.address, p.avatarUrl, p.accent, Date.now(), Date.now()],
   })
+}
+
+/** Where a wallet's picture is served from. `v` changes whenever the picture does. */
+export function avatarLink(address: string, v: number): string {
+  return `/api/avatar?a=${address.toLowerCase()}&v=${v || 1}`
+}
+
+/** The stored picture (a data URL) for a wallet, or '' when it has none. */
+export async function getAvatarDataUrl(address: string): Promise<string> {
+  const db = getTursoClient()
+  if (!db) return ''
+  await ensureSocialSchema()
+  const rs = await db.execute({ sql: 'SELECT avatar_url FROM profiles WHERE lower(address) = ? LIMIT 1', args: [address.toLowerCase()] })
+  return String(rs.rows[0]?.avatar_url ?? '')
 }
 
 // ── Payment history persistence (normal pay + tips) ──────────────────────────

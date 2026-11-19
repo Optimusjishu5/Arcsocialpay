@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { isAddress } from 'viem'
-import { isTursoConfigured, ensureSocialSchema, isUsernameTaken, updateProfileIdentity } from '@/lib/turso'
+import { isTursoConfigured, ensureSocialSchema, getAvatarDataUrl, isUsernameTaken, updateProfileIdentity } from '@/lib/turso'
+import { requireSession } from '@/lib/session'
 import {
   AVATAR_DATA_URL_MAX,
   AVATAR_DATA_URL_PATTERN,
@@ -33,29 +34,38 @@ export async function POST(req: Request) {
   } catch {
     return NextResponse.json({ error: 'Invalid JSON' }, { status: 400 })
   }
-  const { address, username = '', bio = '', avatarUrl = '', accent = '', updatedAt, signature } = body
+  const { address, username = '', bio = '', accent = '', updatedAt, signature } = body
+  let avatarUrl = body.avatarUrl ?? ''
   if (!address || !isAddress(address)) return NextResponse.json({ error: 'Valid address required' }, { status: 400 })
   if (!USERNAME_PATTERN.test(username)) {
     return NextResponse.json({ error: 'Username must be 3-20 letters, numbers, dots or underscores' }, { status: 400 })
   }
   if (bio.length > BIO_MAX) return NextResponse.json({ error: `Bio is limited to ${BIO_MAX} characters` }, { status: 400 })
-  if (avatarUrl && (avatarUrl.length > AVATAR_DATA_URL_MAX || !AVATAR_DATA_URL_PATTERN.test(avatarUrl))) {
+  // The profile list carries pictures as links. Keeping the current picture sends its own link back.
+  const own = avatarUrl.match(/^\/api\/avatar\?a=(0x[0-9a-fA-F]{40})&v=\d+$/)
+  const keepsCurrent = !!own && own[1].toLowerCase() === address.toLowerCase()
+  if (avatarUrl && (!keepsCurrent && (avatarUrl.length > AVATAR_DATA_URL_MAX || !AVATAR_DATA_URL_PATTERN.test(avatarUrl)))) {
     return NextResponse.json({ error: 'Profile picture must be a small JPEG, PNG or WebP image' }, { status: 400 })
   }
   if (accent && !(PROFILE_ACCENTS as readonly string[]).includes(accent)) {
     return NextResponse.json({ error: 'Unknown profile color' }, { status: 400 })
   }
-  if (typeof updatedAt !== 'number' || Math.abs(Date.now() - updatedAt) > MAX_CLOCK_SKEW_MS) {
-    return NextResponse.json({ error: 'Signature expired. Please try again.' }, { status: 400 })
+  // A signed-in wallet edits its own profile without another signature. Otherwise the edit must be signed.
+  const signedIn = requireSession(req)
+  const bySession = !!signedIn && signedIn === address.toLowerCase()
+  if (!bySession) {
+    if (typeof updatedAt !== 'number' || Math.abs(Date.now() - updatedAt) > MAX_CLOCK_SKEW_MS) {
+      return NextResponse.json({ error: 'Signature expired. Please try again.' }, { status: 400 })
+    }
+    if (!signature || !/^0x[0-9a-fA-F]+$/.test(signature)) {
+      return NextResponse.json({ error: 'Signature required' }, { status: 401 })
+    }
+    const ok = await verifyProfileSignature(
+      { address, username, bio, avatarUrl, accent, updatedAt },
+      signature as `0x${string}`,
+    )
+    if (!ok) return NextResponse.json({ error: 'Invalid signature' }, { status: 401 })
   }
-  if (!signature || !/^0x[0-9a-fA-F]+$/.test(signature)) {
-    return NextResponse.json({ error: 'Signature required' }, { status: 401 })
-  }
-  const ok = await verifyProfileSignature(
-    { address, username, bio, avatarUrl, accent, updatedAt },
-    signature as `0x${string}`,
-  )
-  if (!ok) return NextResponse.json({ error: 'Invalid signature' }, { status: 401 })
 
   try {
     await ensureSocialSchema()
@@ -63,6 +73,7 @@ export async function POST(req: Request) {
     if (await isUsernameTaken(username, key)) {
       return NextResponse.json({ error: 'That username is already taken' }, { status: 409 })
     }
+    if (keepsCurrent) avatarUrl = await getAvatarDataUrl(key)
     await updateProfileIdentity({ address: key, username, bio, avatarUrl, accent })
     return NextResponse.json({ ok: true })
   } catch (e) {

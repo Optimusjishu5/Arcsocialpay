@@ -10,6 +10,7 @@ import { getAddress } from 'viem'
 import { ARC_CHAIN_ID } from '../chains'
 import { PROFILE_DOMAIN, PROFILE_TYPES, profileTypedMessage } from '../lib/chatAuth'
 import { appStore } from '../store/appStore'
+import { authedFetch, readSession } from '../lib/chatSession'
 
 export interface ProfileEdit {
   username: string
@@ -37,25 +38,30 @@ export function useProfileSaving() {
     async (address: string, edit: ProfileEdit): Promise<void> => {
       const owner = getAddress(address)
       if (serverStored) {
-        if (chainId !== ARC_CHAIN_ID) await switchChainAsync({ chainId: ARC_CHAIN_ID })
-        const updatedAt = Date.now()
-        const signature = await signTypedDataAsync({
-          domain: PROFILE_DOMAIN,
-          types: PROFILE_TYPES,
-          primaryType: 'ProfileUpdate',
-          message: profileTypedMessage({ address: owner, ...edit, updatedAt }),
-        })
-        const res = await fetch('/api/profiles/me', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ address: owner, ...edit, updatedAt, signature }),
-        })
+        const post = async (extra: Record<string, unknown>, session: ReturnType<typeof readSession>) => {
+          const init = { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ address: owner, ...edit, ...extra }) }
+          return session ? authedFetch(session, '/api/profiles/me', init) : fetch('/api/profiles/me', init)
+        }
+        // Signed in already: no wallet prompt. Otherwise (or if the sign-in has run out) the wallet signs the edit once.
+        let res = await post({}, readSession(owner))
+        if (res.status === 401 || res.status === 400 && !readSession(owner)) {
+          if (chainId !== ARC_CHAIN_ID) await switchChainAsync({ chainId: ARC_CHAIN_ID })
+          const updatedAt = Date.now()
+          const signature = await signTypedDataAsync({
+            domain: PROFILE_DOMAIN,
+            types: PROFILE_TYPES,
+            primaryType: 'ProfileUpdate',
+            message: profileTypedMessage({ address: owner, ...edit, updatedAt }),
+          })
+          res = await post({ updatedAt, signature }, null)
+        }
         if (!res.ok) {
           const body = (await res.json().catch(() => ({}))) as { error?: string }
           throw new Error(body.error ?? 'Could not save your profile.')
         }
       }
       appStore.upsertProfile(owner, { address: owner, ...edit })
+      appStore.markProfileSaved(owner)
     },
     [serverStored, chainId, signTypedDataAsync, switchChainAsync],
   )

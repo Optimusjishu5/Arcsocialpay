@@ -5,7 +5,7 @@
 // TURSO_DATABASE_URL + TURSO_AUTH_TOKEN are set (see usePersistentChat).
 // All financial transactions go through the real blockchain (Arc Mainnet).
 
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useSyncExternalStore } from 'react'
 import { toast } from 'sonner'
 import { getAddress } from 'viem'
 import type {
@@ -271,6 +271,9 @@ function scheduleSave(state: AppState): void {
 
 let globalState: AppState = capState(loadState())
 const listeners = new Set<() => void>()
+/** Profiles just saved on this device (address -> time). A server answer that was already on its way must not undo them. */
+const justSaved = new Map<string, number>()
+const JUST_SAVED_MS = 10_000
 
 /**
  * One-time move of chats saved by earlier versions (all wallets mixed in one entry) into per-wallet
@@ -426,6 +429,11 @@ export const appStore = {
       },
     }))
     return true
+  },
+
+  /** Call right after a profile edit was saved, so a poll that started earlier cannot bring the old picture back. */
+  markProfileSaved(address: string) {
+    justSaved.set(normalizeAddress(address).toLowerCase(), Date.now())
   },
 
   getProfile(address: string): UserProfile | undefined {
@@ -1182,7 +1190,9 @@ export const appStore = {
       for (const p of profiles) {
         if (!p || typeof p.address !== 'string') continue
         const key = normalizeAddress(p.address)
-        next[key] = {
+        const saved = justSaved.get(key.toLowerCase())
+        const mine = saved !== undefined && Date.now() - saved < JUST_SAVED_MS ? s.profiles[key] : undefined
+        next[key] = mine ? { ...mine, followerCount: typeof p.followerCount === 'number' ? p.followerCount : mine.followerCount, followingCount: typeof p.followingCount === 'number' ? p.followingCount : mine.followingCount } : {
           address: key,
           username: typeof p.username === 'string' ? p.username : '',
           bio: typeof p.bio === 'string' ? p.bio : '',
@@ -1367,6 +1377,15 @@ export function useAppStore() {
   }, [])
 
   return globalState
+}
+
+/** One wallet's profile. Re-renders only when that profile changes, so pictures update the moment they are saved. */
+export function useProfile(address: string | undefined): UserProfile | undefined {
+  return useSyncExternalStore(
+    (cb) => { listeners.add(cb); return () => { listeners.delete(cb) } },
+    () => (address ? appStore.getProfile(address) : undefined),
+    () => undefined,
+  )
 }
 
 export function useTheme() {
