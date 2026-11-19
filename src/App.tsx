@@ -1,6 +1,6 @@
 'use client'
 
-import { Suspense, useState, useEffect } from 'react'
+import { Suspense, useState, useEffect, useRef } from 'react'
 import { motion } from 'framer-motion'
 import { isAddress } from 'viem'
 import { useArcAccount, useUsdcBalance } from './hooks/useArcWallet'
@@ -20,6 +20,7 @@ import { parsePayPrefill } from './utils/payRequests'
 import { OPEN_CHAT_EVENT, OPEN_VIEW_EVENT } from './lib/incomingAlerts'
 import { useActivityNotices } from './hooks/useActivityNotices'
 import { useFollowSync } from './hooks/useFollowSync'
+import { OPEN_PROFILE_EVENT } from './components/ui/ProfileLink'
 import type { NavView } from './types/index'
 
 const VIEW_TITLES: Record<NavView, string> = {
@@ -121,6 +122,9 @@ export default function App() {
   }, [nav.view])
   useEffect(() => prefetchAllViews(), [])
 
+  const addressRef = useRef(address)
+  useEffect(() => { addressRef.current = address }, [address])
+
   // Tapping a message alert (toast or system notification) opens that chat.
   useEffect(() => {
     const open = (convId: unknown) => {
@@ -131,12 +135,22 @@ export default function App() {
       if ((e as CustomEvent<{ view?: string }>).detail?.view === 'notifications') { setNav({ view: 'notifications' }); window.scrollTo({ top: 0, behavior: 'auto' }) }
     }
     window.addEventListener(OPEN_VIEW_EVENT, onView)
+    const onProfile = (e: Event) => {
+      const who = (e as CustomEvent<{ address?: string }>).detail?.address
+      if (!who) return
+      // Your own picture opens your own profile.
+      const mine = !!addressRef.current && who.toLowerCase() === addressRef.current.toLowerCase()
+      setNav(mine ? { view: 'profile' } : { view: 'profile', extra: { address: who } })
+      window.scrollTo({ top: 0, behavior: 'auto' })
+    }
+    window.addEventListener(OPEN_PROFILE_EVENT, onProfile)
     const onWorker = (e: MessageEvent<{ type?: string; convId?: unknown } | null>) => { if (e.data?.type === OPEN_CHAT_EVENT) open(e.data.convId) }
     window.addEventListener(OPEN_CHAT_EVENT, onEvent)
     navigator.serviceWorker?.addEventListener('message', onWorker)
     return () => {
       window.removeEventListener(OPEN_CHAT_EVENT, onEvent)
       window.removeEventListener(OPEN_VIEW_EVENT, onView)
+      window.removeEventListener(OPEN_PROFILE_EVENT, onProfile)
       navigator.serviceWorker?.removeEventListener('message', onWorker)
     }
   }, [])

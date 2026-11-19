@@ -5,10 +5,11 @@ import { ConnectKitButton } from 'connectkit'
 import { useArcAccount } from '../hooks/useArcWallet'
 import { appStore, useAppStore, isSameAddress } from '../store/appStore'
 import { Avatar } from './ui/Avatar'
+import { AuthorName, ProfileLink } from './ui/ProfileLink'
 import { Button } from './ui/Button'
 import { EmptyState } from './ui/EmptyState'
 import { Modal } from './ui/Modal'
-import { formatAddress, formatTimestamp } from '../utils/format'
+import { formatTimestamp } from '../utils/format'
 import { copyText } from '../utils/copy'
 import type { Post, Comment } from '../types/index'
 
@@ -210,18 +211,22 @@ const PostCard = memo(function PostCard({ post, myAddress, comments, isCommentsO
       {post.repostOf && (
         <div className="flex items-center gap-1.5 mb-2 text-xs font-medium" style={{ color: 'var(--muted)' }}>
           <Repeat2 size={12} />
-          <span>{formatAddress(post.authorAddress)} reposted</span>
+          <span><AuthorName address={post.authorAddress} /> reposted</span>
         </div>
       )}
 
       <div className="flex items-start gap-3">
-        <Avatar address={post.repostOf ? (originalPost?.authorAddress ?? post.authorAddress) : post.authorAddress} size={42} />
+        <ProfileLink address={post.repostOf ? (originalPost?.authorAddress ?? post.authorAddress) : post.authorAddress} className="flex-shrink-0 rounded-full">
+          <Avatar address={post.repostOf ? (originalPost?.authorAddress ?? post.authorAddress) : post.authorAddress} size={42} />
+        </ProfileLink>
         <div className="flex-1 min-w-0">
           {/* Author + time */}
           <div className="flex items-center gap-2 mb-1">
-            <span className="font-semibold text-sm" style={{ color: 'var(--ink)' }}>
-              {formatAddress(post.repostOf ? (originalPost?.authorAddress ?? post.authorAddress) : post.authorAddress)}
-            </span>
+            <ProfileLink address={post.repostOf ? (originalPost?.authorAddress ?? post.authorAddress) : post.authorAddress} className="min-w-0">
+              <span className="block truncate font-semibold text-sm" style={{ color: 'var(--ink)' }}>
+                <AuthorName address={post.repostOf ? (originalPost?.authorAddress ?? post.authorAddress) : post.authorAddress} />
+              </span>
+            </ProfileLink>
             {post.editedAt && (
               <span className="text-xs" style={{ color: 'var(--subtle)' }}>edited</span>
             )}
@@ -356,13 +361,15 @@ const CommentsSection = memo(function CommentsSection({ postId, comments, myAddr
     <div className="space-y-2">
       {comments.map((c) => (
         <div key={c.id} className="flex items-start gap-2">
-          <Avatar address={c.authorAddress} size={28} />
+          <ProfileLink address={c.authorAddress} className="flex-shrink-0 rounded-full"><Avatar address={c.authorAddress} size={28} /></ProfileLink>
           <div className="flex-1 rounded-xl px-3 py-2"
             style={{ background: 'var(--surface-muted)' }}>
             <div className="flex items-center gap-2 mb-0.5">
-              <span className="text-xs font-semibold" style={{ color: 'var(--ink)' }}>
-                {formatAddress(c.authorAddress)}
-              </span>
+              <ProfileLink address={c.authorAddress}>
+                <span className="text-xs font-semibold" style={{ color: 'var(--ink)' }}>
+                  <AuthorName address={c.authorAddress} />
+                </span>
+              </ProfileLink>
               <span className="text-xs" style={{ color: 'var(--subtle)' }}>
                 {formatTimestamp(c.createdAt)}
               </span>

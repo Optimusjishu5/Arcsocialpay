@@ -9,6 +9,8 @@ import { authedFetch, readSession } from '../lib/chatSession'
 import { clearFollowers, setFollowers } from '../lib/followers'
 
 const POLL_MS = 6000
+/** Fired after the person follows or unfollows someone. */
+export const FOLLOW_CHANGED_EVENT = 'socialpay:follow-changed'
 const lc = (s: string) => s.toLowerCase()
 
 export function useFollowSync(address: string | undefined) {
@@ -44,9 +46,17 @@ export function useFollowSync(address: string | undefined) {
         // Load who follows you.
         const res = await authedFetch(session, '/api/follows')
         if (!res.ok) return
-        const json = (await res.json()) as { configured?: boolean; followers?: { address?: unknown }[] }
+        const json = (await res.json()) as { configured?: boolean; followers?: { address?: unknown }[]; following?: unknown[] }
         if (json.configured === false) { off = true; return }
         if (cancelled) return
+        // Follows made on another device show up here too, except those this device is just undoing.
+        const theirs = (json.following ?? []).filter((x): x is string => typeof x === 'string')
+        const undoing = new Set(changes.filter(([, follow]) => !follow).map(([t]) => t))
+        const toImport = theirs.filter((a) => !undoing.has(lc(a)))
+        if (toImport.length > 0) appStore.importFollowing(address, toImport)
+        // What the server holds now, so a later unfollow of any of these is sent too.
+        pushed.clear()
+        for (const t of theirs) pushed.add(lc(t))
         const list = (json.followers ?? []).map((f) => (typeof f.address === 'string' ? f.address : '')).filter(Boolean)
         setFollowers(address, list)
         window.dispatchEvent(new Event('socialpay:followers-synced'))
@@ -59,6 +69,9 @@ export function useFollowSync(address: string | undefined) {
 
     void tick()
     const iv = setInterval(() => void tick(), POLL_MS)
-    return () => { cancelled = true; clearInterval(iv) }
+    // Following or unfollowing someone sends the change straight away.
+    const now = () => void tick()
+    window.addEventListener(FOLLOW_CHANGED_EVENT, now)
+    return () => { cancelled = true; clearInterval(iv); window.removeEventListener(FOLLOW_CHANGED_EVENT, now) }
   }, [address])
 }

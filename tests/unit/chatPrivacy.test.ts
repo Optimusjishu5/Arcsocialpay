@@ -314,3 +314,22 @@ describe('followers', () => {
     expect((await h.follows.GET(req('/api/follows', 'GET'))).status).toBe(401)
   })
 })
+
+describe('follow counts and lists', () => {
+  test('counts and lists are available for any wallet, and tell you whether you follow it', async () => {
+    // Earlier tests left B following A. Now A follows B.
+    expect((await h.follows.POST(req('/api/follows', 'POST', tokenA, { target: B.address, follow: true }))).status).toBe(200)
+    const seenByA = (await (await h.follows.GET(req('/api/follows?address=' + B.address, 'GET', tokenA))).json()) as { followers: number; following: number; youFollow: boolean }
+    expect(seenByA).toMatchObject({ followers: 1, following: 1, youFollow: true })
+    const seenByC = (await (await h.follows.GET(req('/api/follows?address=' + B.address, 'GET', tokenC))).json()) as { youFollow: boolean }
+    expect(seenByC.youFollow).toBe(false)
+    const list = (await (await h.follows.GET(req('/api/follows?address=' + A.address + '&list=followers', 'GET', tokenC))).json()) as { people: string[] }
+    expect(list.people).toEqual([B.address.toLowerCase()])
+  })
+
+  test('your own lists include who you follow, and a bad address is refused', async () => {
+    const mine = (await (await h.follows.GET(req('/api/follows', 'GET', tokenA))).json()) as { following: string[]; followers: unknown[] }
+    expect(mine.following).toEqual([B.address.toLowerCase()])
+    expect((await h.follows.GET(req('/api/follows?address=nope', 'GET', tokenA))).status).toBe(400)
+  })
+})

@@ -748,3 +748,26 @@ export async function listFollowers(followee: string): Promise<{ address: string
   })
   return res.rows.map((r) => ({ address: String(r.follower), createdAt: Number(r.created_at) }))
 }
+
+/** How many wallets follow `address`, how many it follows, and whether `viewer` follows it. */
+export async function followStats(address: string, viewer?: string): Promise<{ followers: number; following: number; youFollow: boolean }> {
+  const db = getTursoClient()
+  if (!db) return { followers: 0, following: 0, youFollow: false }
+  await ensureSocialSchema()
+  const a = address.toLowerCase()
+  const [followers, following, you] = await Promise.all([
+    db.execute({ sql: 'SELECT COUNT(*) AS n FROM follows WHERE followee = ?', args: [a] }),
+    db.execute({ sql: 'SELECT COUNT(*) AS n FROM follows WHERE follower = ?', args: [a] }),
+    viewer ? db.execute({ sql: 'SELECT 1 AS y FROM follows WHERE follower = ? AND followee = ? LIMIT 1', args: [viewer.toLowerCase(), a] }) : Promise.resolve(null),
+  ])
+  return { followers: Number(followers.rows[0]?.n ?? 0), following: Number(following.rows[0]?.n ?? 0), youFollow: !!you && you.rows.length > 0 }
+}
+
+/** The wallets `address` follows, newest first. */
+export async function listFollowing(address: string, limit = 500): Promise<string[]> {
+  const db = getTursoClient()
+  if (!db) return []
+  await ensureSocialSchema()
+  const res = await db.execute({ sql: 'SELECT followee FROM follows WHERE follower = ? ORDER BY created_at DESC LIMIT ?', args: [address.toLowerCase(), limit] })
+  return res.rows.map((r) => String(r.followee))
+}

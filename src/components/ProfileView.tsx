@@ -1,12 +1,12 @@
 import { useState } from 'react'
 import {
-  Camera, Copy, UserPlus, UserMinus, MessageCircle, ArrowUpRight, ArrowDownLeft,
-  Pencil, FileText, Wallet, Users, Heart, Activity, BadgeCheck,
+  Camera, Copy, UserPlus, UserMinus, MessageCircle,
+  Pencil, FileText, Wallet, Users, Heart, Activity, BadgeCheck, ArrowLeft,
 } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 import { ConnectKitButton } from 'connectkit'
 import { motion } from 'framer-motion'
-import { useArcAccount, useUsdcBalance, ARC_CHAIN_ID } from '../hooks/useArcWallet'
+import { useArcAccount, useUsdcBalance } from '../hooks/useArcWallet'
 import { appStore, useAppStore, filterTxHistoryForAddress, isSameAddress } from '../store/appStore'
 import { Avatar } from './ui/Avatar'
 import { PhotoFrame } from './profile/PhotoFrame'
@@ -20,6 +20,9 @@ import { copyText } from '../utils/copy'
 import { PROFILE_ACCENTS } from '../lib/chatAuth'
 import type { NavView } from '../types/index'
 import { AddressExplorerLinks, ExplorerLinks } from './ui/ExplorerLinks'
+import { FollowList } from './profile/FollowList'
+import { useFollowStats } from '../hooks/useFollowStats'
+import { FOLLOW_CHANGED_EVENT } from '../hooks/useFollowSync'
 
 interface Props {
   viewAddress?: string // if undefined: show own profile
@@ -50,7 +53,22 @@ export function ProfileView({ viewAddress, onNavigate }: Props) {
   const myPosts = posts.filter((p) => targetAddress && isSameAddress(p.authorAddress, targetAddress))
   // Activity filter only (DATA/INDEXING): scope txHistory to viewed address, case-insensitive.
   const myTxs = filterTxHistoryForAddress(txHistory, targetAddress).slice(0, 10)
-  const isFollowing = address && targetAddress ? appStore.isFollowing(address, targetAddress) : false
+  const stats = useFollowStats(address, isOwn ? undefined : targetAddress)
+  const [followList, setFollowList] = useState<'followers' | 'following' | null>(null)
+  // Right after a tap the server may still show the old answer, so for a few seconds the tap wins.
+  const [justToggled, setJustToggled] = useState(false)
+  const localFollowing = address && targetAddress ? appStore.isFollowing(address, targetAddress) : false
+  const isFollowing = localFollowing || (!!stats?.youFollow && !justToggled)
+
+  function toggleFollow() {
+    if (!address || !targetAddress) return
+    // If the server already lists this follow (made on another device), line this device up first so the tap undoes it.
+    if (!localFollowing && isFollowing) appStore.importFollowing(address, [targetAddress])
+    appStore.toggleFollow(address, targetAddress)
+    setJustToggled(true)
+    setTimeout(() => setJustToggled(false), 8000)
+    window.dispatchEvent(new Event(FOLLOW_CHANGED_EVENT))
+  }
 
   if (!isConnected && isOwn) {
     return (
@@ -69,7 +87,10 @@ export function ProfileView({ viewAddress, onNavigate }: Props) {
   const accent = accentFor(targetAddress, profile?.accent)
   const [from, to] = TONES[accent]
   const displayName = profile?.username || formatAddress(targetAddress)
-  const following = (Object.entries(followMap).find(([k]) => isSameAddress(k, targetAddress))?.[1] ?? []).length
+  const localFollowingCount = (Object.entries(followMap).find(([k]) => isSameAddress(k, targetAddress))?.[1] ?? []).length
+  // The server's numbers are the real ones; this device's numbers are shown until it answers.
+  const following = stats?.following ?? localFollowingCount
+  const followers = stats?.followers ?? profile?.followerCount ?? 0
 
   return (
     <div className="tone-scope relative flex flex-col max-w-xl mx-auto pb-8 overflow-hidden" style={toneVars(accent)}>
@@ -81,6 +102,16 @@ export function ProfileView({ viewAddress, onNavigate }: Props) {
       />
 
       <div className="relative px-4">
+        {!isOwn && (
+          <button
+            type="button"
+            onClick={() => onNavigate('explore')}
+            className="relative z-10 mt-3 inline-flex h-11 items-center gap-1.5 rounded-full px-3 text-sm font-semibold active:opacity-70"
+            style={{ color: 'var(--ink)' }}
+          >
+            <ArrowLeft size={18} aria-hidden /> Back
+          </button>
+        )}
         {/* Hero: round picture, name, bio, actions */}
         <motion.div
           initial={{ opacity: 0, y: 8 }}
@@ -161,7 +192,7 @@ export function ProfileView({ viewAddress, onNavigate }: Props) {
                   <MessageCircle size={14} />
                   Message
                 </Button>
-                <Button onClick={() => address && appStore.toggleFollow(address, targetAddress)}>
+                <Button onClick={toggleFollow} disabled={!address} aria-pressed={isFollowing}>
                   {isFollowing ? <><UserMinus size={14} /> Unfollow</> : <><UserPlus size={14} /> Follow</>}
                 </Button>
               </>
@@ -174,8 +205,8 @@ export function ProfileView({ viewAddress, onNavigate }: Props) {
           <div className="grid grid-cols-4 gap-2">
             <Stat icon={FileText} tone="blue" label="Posts" value={myPosts.length} />
             <Stat icon={Wallet} tone="green" label="Balance" value={balLoading ? '...' : `$${balanceDisplay}`} small />
-            <Stat icon={Users} tone="violet" label="Followers" value={profile?.followerCount ?? 0} />
-            <Stat icon={Heart} tone="rose" label="Following" value={following} />
+            <Stat icon={Users} tone="violet" label="Followers" value={followers} onClick={() => setFollowList('followers')} />
+            <Stat icon={Heart} tone="rose" label="Following" value={following} onClick={() => setFollowList('following')} />
           </div>
         </div>
 
@@ -257,6 +288,10 @@ export function ProfileView({ viewAddress, onNavigate }: Props) {
         )}
       </div>
 
+      {followList && (
+        <FollowList open onClose={() => setFollowList(null)} me={address} target={targetAddress} kind={followList} />
+      )}
+
       {isOwn && address && editOpen && (
         <EditProfileModal
           open
@@ -274,14 +309,15 @@ export function ProfileView({ viewAddress, onNavigate }: Props) {
   )
 }
 
-function Stat({ icon, tone, label, value, small }: { icon: LucideIcon; tone: Tone; label: string; value: string | number; small?: boolean }) {
+function Stat({ icon, tone, label, value, small, onClick }: { icon: LucideIcon; tone: Tone; label: string; value: string | number; small?: boolean; onClick?: () => void }) {
+  const Tag = onClick ? 'button' : 'div'
   return (
-    <div className="flex flex-col items-center gap-1.5 rounded-2xl py-3 px-1" data-tp="">
+    <Tag type={onClick ? 'button' : undefined} onClick={onClick} className={`flex flex-col items-center gap-1.5 rounded-2xl py-3 px-1 ${onClick ? 'active:opacity-70 min-h-[44px]' : ''}`} data-tp="">
       <GradientIcon icon={icon} tone={tone} size={30} />
       <div className={`font-bold tabnum ${small ? 'text-sm' : 'text-base'}`} style={{ color: 'var(--ink)', letterSpacing: '-0.01em' }}>
         {value}
       </div>
       <div className="text-[11px]" style={{ color: 'var(--subtle)' }}>{label}</div>
-    </div>
+    </Tag>
   )
 }

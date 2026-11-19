@@ -1023,6 +1023,18 @@ export const appStore = {
     })
   },
 
+  /** Adds follows made on another device. Nothing is removed here: unfollowing goes through toggleFollow. */
+  importFollowing(myAddress: string, list: string[]) {
+    const me = normalizeAddress(myAddress)
+    setState((s) => {
+      const meKey = Object.keys(s.followMap).find((k) => sameAddress(k, me)) ?? Object.keys(s.profiles).find((k) => sameAddress(k, me)) ?? me
+      const current = s.followMap[meKey] ?? s.followMap[me] ?? []
+      const extra = list.filter((a) => !sameAddress(a, me) && !includesAddress(current, a)).map(normalizeAddress)
+      if (extra.length === 0) return s
+      return { ...s, followMap: { ...s.followMap, [meKey]: [...current, ...extra] } }
+    })
+  },
+
   isFollowing(myAddress: string, targetAddress: string): boolean {
     if (!myAddress || !targetAddress) return false
     const entry = Object.entries(globalState.followMap).find(([k]) =>
