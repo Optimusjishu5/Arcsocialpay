@@ -9,6 +9,7 @@ import { APP_URL, DOCS_URL, GITHUB_URL, X_URL } from '../links'
 import { ProductPreview } from './ProductPreview'
 import { Features, HowItWorks, Integrations } from './Sections'
 import { Architecture, FinalCta, Roadmap, Security } from './Trust'
+import { CircleCertified } from './CircleCertified'
 
 function Pill({ children }: { children: React.ReactNode }) {
   return (
@@ -80,6 +81,7 @@ export function Landing() {
       <SiteHeader />
       <main>
         <Hero />
+        <CircleCertified />
         <Mission />
         <ProductPreview />
         <Features />

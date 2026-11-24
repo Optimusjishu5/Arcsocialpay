@@ -6,6 +6,8 @@ export const SITE_NAME = 'SocialPay'
 export const SITE_URL = 'https://socialpay.online'
 export const GITHUB_URL = 'https://github.com/Optimusjishu5/Arcsocialpay'
 export const X_URL = 'https://x.com/SocialPayHQ'
+/** SocialPay's page in Circle's partner directory (its certificate). */
+export const CIRCLE_PARTNER_URL = 'https://partners.circle.com/partner/socialpay'
 export const GITHUB_ISSUES_URL = `${GITHUB_URL}/issues`
 export const GITHUB_CONTRACT_URL = `${GITHUB_URL}/blob/main/contracts/ArcSocialPay.sol`
 export const APP_URL = '/app'
@@ -113,4 +115,5 @@ export const FOOTER_LINKS = [
   { label: 'X', href: X_URL, external: true },
   { label: 'Contact', href: GITHUB_ISSUES_URL, external: true },
   { label: 'Arc Explorer', href: EXPLORER_URL, external: true },
+  { label: 'Circle Alliance', href: CIRCLE_PARTNER_URL, external: true },
 ] as const
