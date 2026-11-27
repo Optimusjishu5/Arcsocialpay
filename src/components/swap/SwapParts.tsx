@@ -1,7 +1,7 @@
 'use client'
 
 import type { ReactNode } from 'react'
-import { AlertCircle, Check, Layers, Route, Sparkles } from 'lucide-react'
+import { AlertCircle, Check, Layers, Route, Sparkles, Zap } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 import { ARC_CHAIN_ID } from '../../chains'
 import { GradientIcon, type Tone } from '../dashboard/ui'
@@ -15,6 +15,7 @@ export const ROUTE_META: Record<SwapProviderId, { name: string; icon: LucideIcon
   uniswap: { name: 'Uniswap', icon: Sparkles, tone: 'pink' },
   kyber: { name: 'KyberSwap', icon: Layers, tone: 'teal' },
   lifi: { name: 'LI.FI', icon: Route, tone: 'violet' },
+  achswap: { name: 'AchSwap', icon: Zap, tone: 'amber' },
 }
 
 export function Row({ label, value, tone }: { label: string; value: string; tone?: 'bad' }) {

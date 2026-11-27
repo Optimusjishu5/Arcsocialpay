@@ -172,17 +172,30 @@ export function useSwapEngine({ routes, tokenFilter }: SwapEngineOptions) {
   }
 
   async function swap() {
-    const quote = selected
-    if (!client || !address || !quote || !fresh || amountIn === null) return
+    const reviewed = selected
+    if (!client || !address || !reviewed || !fresh || amountIn === null) return
     setError('')
     try {
       // A price older than a few seconds is replaced, and you confirm the new one.
-      if (Date.now() - quote.fetchedAt > STALE_MS) {
+      if (Date.now() - reviewed.fetchedAt > STALE_MS) {
         await fetchQuotes()
         setError('The price was refreshed. Review it and confirm again.')
         return
       }
       if (chainId !== ARC_CHAIN_ID) await switchChainAsync({ chainId: ARC_CHAIN_ID })
+
+      // Some routes build the transaction only now, priced again. It must still give you at least what you reviewed.
+      let quote = reviewed
+      if (reviewed.prepare) {
+        quote = await reviewed.prepare(address)
+        const bad = validateSwapQuote(quote)
+        if (bad) throw new Error(bad)
+        if (quote.minOut < reviewed.minOut) {
+          await fetchQuotes()
+          setError('The price moved. Review the new price and confirm again.')
+          return
+        }
+      }
 
       // Exact-amount approval, only when the router cannot already spend enough.
       if (quote.spender) {

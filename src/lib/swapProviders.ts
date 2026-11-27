@@ -9,7 +9,7 @@ import { ARC_CHAIN_ID } from '../chains'
 import { buildSwapCall, minOut as minOutBps, quoteUniswap, UNISWAP_ARC, feeLabel } from './uniswapArc'
 import type { ArcToken, TokenSource } from './arcTokens'
 
-export type SwapProviderId = 'uniswap' | 'kyber' | 'lifi'
+export type SwapProviderId = 'uniswap' | 'kyber' | 'lifi' | 'achswap'
 
 export interface SwapQuoteRequest {
   client: PublicClient
@@ -30,6 +30,11 @@ export interface SwapQuote {
   tx: { to: Address; data: Hex; value: bigint }
   details: { label: string; value: string }[]
   fetchedAt: number
+  /**
+   * Some routes show a price first and build the transaction only when you confirm, as that route's docs advise.
+   * It returns the same quote with the real transaction, priced again right then.
+   */
+  prepare?: (user: Address) => Promise<SwapQuote>
 }
 
 export interface SwapProviderConfig {
@@ -160,6 +165,64 @@ async function quoteLifi(r: SwapQuoteRequest): Promise<SwapQuote> {
   }
 }
 
+// ── AchSwap ─────────────────────────────────────────────────────────────────
+
+/** AchRouteExecutorV2: the only contract an AchSwap transaction may call or be approved for. */
+export const ACHSWAP_EXECUTOR: Address = '0xF69036De0e32566CfF7C79c29229D441cdE3e48E'
+
+interface AchResponse {
+  amountOut: string; minAmountOut: string; grossAmountOut?: string; priceImpactBps?: number | null; gasEstimate?: string | null
+  fees?: { protocolBps?: number; partnerBps?: number }
+  route?: { shareBps?: number; hops?: { dex?: string }[] }[]
+  tx?: { to: string; data: string; value?: string; gas?: string | null }
+  approval?: { token: string; spender: string; amount: string } | null
+  simulated?: boolean
+}
+
+async function callAch(body: Record<string, unknown>): Promise<AchResponse> {
+  const res = await fetch('/api/achswap', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) })
+  const json = (await res.json().catch(() => ({}))) as AchResponse & { error?: { code?: string; message?: string } }
+  if (res.status === 429) throw new Error('AchSwap is busy right now. Wait a few seconds and try again.')
+  if (!res.ok) {
+    if (json.error?.code === 'NO_ROUTE') throw new Error('AchSwap found no route for this pair and amount.')
+    throw new Error(json.error?.message ?? `AchSwap request failed (${res.status})`)
+  }
+  return json
+}
+
+function achDetails(d: AchResponse): { label: string; value: string }[] {
+  const dexes = [...new Set((d.route ?? []).flatMap((r) => (r.hops ?? []).map((h) => h.dex)).filter(Boolean))] as string[]
+  const out: { label: string; value: string }[] = []
+  if (dexes.length) out.push({ label: 'Route', value: dexes.slice(0, 3).join(', ') })
+  if (d.fees?.protocolBps) out.push({ label: 'AchSwap fee', value: `${(d.fees.protocolBps / 100).toFixed(2)}% (already in the price)` })
+  if (typeof d.priceImpactBps === 'number') out.push({ label: 'Price impact', value: `${(d.priceImpactBps / 100).toFixed(2)}%` })
+  out.push({ label: 'Expires', value: '20 minutes after you confirm' })
+  return out
+}
+
+async function quoteAchswap(r: SwapQuoteRequest): Promise<SwapQuote> {
+  const common = { tokenIn: r.tokenIn.address, tokenOut: r.tokenOut.address, amountIn: r.amountIn.toString(), slippageBps: Math.max(1, r.slippageBps) }
+  const d = await callAch({ action: 'quote', ...common })
+  const amountOut = bi(d.amountOut)
+  const quote: SwapQuote = {
+    provider: 'achswap', amountIn: r.amountIn, amountOut, minOut: bi(d.minAmountOut), spender: ACHSWAP_EXECUTOR,
+    // Placeholder until the swap is built at confirm time (see prepare).
+    tx: { to: ACHSWAP_EXECUTOR, data: '0x', value: 0n },
+    details: achDetails(d), fetchedAt: Date.now(),
+    prepare: async (user) => {
+      const s = await callAch({ action: 'swap', ...common, sender: user })
+      if (!s.tx?.data || s.tx.data === '0x') throw new Error('AchSwap returned no transaction for this swap.')
+      return {
+        provider: 'achswap', amountIn: r.amountIn, amountOut: bi(s.amountOut), minOut: bi(s.minAmountOut),
+        spender: s.approval ? (s.approval.spender as Address) : null,
+        tx: { to: s.tx.to as Address, data: s.tx.data as Hex, value: bi(s.tx.value) },
+        details: achDetails(s), fetchedAt: Date.now(),
+      }
+    },
+  }
+  return quote
+}
+
 // ── Registry ────────────────────────────────────────────────────────────────
 
 export const SWAP_PROVIDERS: Record<SwapProviderId, SwapProviderConfig> = {
@@ -172,6 +235,11 @@ export const SWAP_PROVIDERS: Record<SwapProviderId, SwapProviderConfig> = {
     id: 'kyber', name: 'KyberSwap', hint: 'Best route across pools', auto: true, allowCustom: false, source: 'kyber',
     notice: 'KyberSwap splits your swap across Arc pools for the best price. Mainnet swaps move real funds, and you are subject to KyberSwap\'s terms of use.',
     quote: quoteKyber,
+  },
+  achswap: {
+    id: 'achswap', name: 'AchSwap', hint: 'Arc DEX aggregator', auto: true, allowCustom: false, source: 'kyber',
+    notice: 'AchSwap compares its own router with other aggregators on Arc and pays out the best route, after its 0.12% fee. Mainnet swaps move real funds.',
+    quote: quoteAchswap,
   },
   lifi: {
     id: 'lifi', name: 'LI.FI', hint: 'Aggregator routing', auto: false, allowCustom: false, source: 'lifi',
@@ -189,6 +257,9 @@ export function validateSwapQuote(q: SwapQuote): string | null {
   const to = q.tx.to.toLowerCase()
   if (q.provider === 'uniswap' && to !== UNISWAP_ARC.swapRouter02.toLowerCase()) return 'The swap points at an unexpected contract.'
   if (q.provider === 'kyber' && (to !== KYBER_ROUTER.toLowerCase() || q.spender?.toLowerCase() !== KYBER_ROUTER.toLowerCase())) return 'The swap points at an unexpected contract.'
+  if (q.provider === 'achswap') {
+    if (to !== ACHSWAP_EXECUTOR.toLowerCase() || (q.spender && q.spender.toLowerCase() !== ACHSWAP_EXECUTOR.toLowerCase())) return 'The swap points at an unexpected contract.'
+  }
   if (q.provider === 'lifi' && q.spender && q.spender.toLowerCase() !== to) return 'The approval target does not match the swap contract. Cancelled for your safety.'
   if (q.minOut <= 0n || q.amountOut <= 0n) return 'The route returned no output amount.'
   return null

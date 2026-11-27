@@ -10,7 +10,7 @@ import { toneVars } from './dashboard/ui'
 type Mode = 'best' | 'any' | 'circle'
 
 const MODES: { id: Mode; title: string; hint: string }[] = [
-  { id: 'best', title: 'Best price', hint: 'Kyber + Uniswap' },
+  { id: 'best', title: 'Best price', hint: 'Kyber, Uniswap, AchSwap' },
   { id: 'any', title: 'Any token', hint: 'LI.FI routing' },
   { id: 'circle', title: 'Circle swap', hint: 'Stablecoins' },
 ]

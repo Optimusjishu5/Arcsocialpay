@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import { ConnectKitButton } from 'connectkit'
 import { AnimatePresence, motion } from 'framer-motion'
 import { ChevronDown, Info } from 'lucide-react'
@@ -8,6 +8,7 @@ import { Button } from '../ui/Button'
 import { formatTokenAmount } from '../../lib/arcTokens'
 import type { SwapProviderId } from '../../lib/swapProviders'
 import { useSwapEngine } from '../../hooks/useSwapEngine'
+import { useAchswapAvailable } from '../../hooks/useAchswapAvailable'
 import { AmountCard, FlipButton, Reveal, SlippagePicker } from './SwapPanel'
 import { TokenPicker } from './TokenPicker'
 import { Notices, QuoteDetails, ROUTE_META, RouteIcon } from './SwapParts'
@@ -16,10 +17,16 @@ const ALL_ROUTES: readonly SwapProviderId[] = ['kyber', 'uniswap']
 const usd = (n?: number) => (n === undefined ? undefined : `≈ $${n < 0.01 && n > 0 ? '<0.01' : n.toFixed(2)}`)
 
 /**
- * "Best price": asks KyberSwap and Uniswap at once, picks the route that
+ * "Best price": asks KyberSwap, Uniswap and AchSwap at once, picks the route that
  * pays the most, and lets you choose another route if you prefer.
+ * AchSwap joins the list when it is set up on the server.
  */
-export function BestPriceView({ routes = ALL_ROUTES }: { routes?: readonly SwapProviderId[] }) {
+export function BestPriceView({ routes: fixedRoutes }: { routes?: readonly SwapProviderId[] }) {
+  const achswap = useAchswapAvailable()
+  const routes = useMemo<readonly SwapProviderId[]>(
+    () => fixedRoutes ?? (achswap ? ['achswap', ...ALL_ROUTES] : ALL_ROUTES),
+    [fixedRoutes, achswap],
+  )
   const e = useSwapEngine({ routes })
   const [picker, setPicker] = useState<'in' | 'out' | null>(null)
   const [showSlippage, setShowSlippage] = useState(false)
