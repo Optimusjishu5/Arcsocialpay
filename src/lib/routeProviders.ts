@@ -161,16 +161,17 @@ export async function quoteLifi(r: RouteRequest): Promise<RouteQuote> {
 export interface ProviderResult { provider: RouteProvider; quote?: RouteQuote; error?: string }
 
 /** Ask all three providers at once; a provider that cannot serve the route reports why. */
-export async function getRouteQuotes(r: RouteRequest): Promise<ProviderResult[]> {
+export async function getRouteQuotes(r: RouteRequest, onEach?: (result: ProviderResult) => void): Promise<ProviderResult[]> {
   const jobs: [RouteProvider, Promise<RouteQuote>][] = [
     ['Across', quoteAcross(r)], ['Relay', quoteRelay(r)], ['LI.FI', quoteLifi(r)],
   ]
-  const settled = await Promise.allSettled(jobs.map(([, p]) => p))
-  return settled.map((s, i) =>
-    s.status === 'fulfilled'
-      ? { provider: jobs[i][0], quote: s.value }
-      : { provider: jobs[i][0], error: s.reason instanceof Error ? s.reason.message : 'Route unavailable' },
-  )
+  // Each provider reports the moment it answers, so a fast one is usable while a slower one is still loading.
+  const answer = (provider: RouteProvider, p: Promise<RouteQuote>): Promise<ProviderResult> =>
+    p.then(
+      (quote): ProviderResult => ({ provider, quote }),
+      (e: unknown): ProviderResult => ({ provider, error: e instanceof Error ? e.message : 'Route unavailable' }),
+    ).then((res) => { onEach?.(res); return res })
+  return Promise.all(jobs.map(([provider, p]) => answer(provider, p)))
 }
 
 /**

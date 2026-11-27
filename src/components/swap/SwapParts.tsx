@@ -4,6 +4,7 @@ import type { ReactNode } from 'react'
 import { AlertCircle, Check, Layers, Route, Sparkles, Zap } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 import { ARC_CHAIN_ID } from '../../chains'
+import { LogoTile } from '../ui/LogoTile'
 import { GradientIcon, type Tone } from '../dashboard/ui'
 import { Reveal } from './SwapPanel'
 import { formatTokenAmount, type ArcToken } from '../../lib/arcTokens'
@@ -100,20 +101,7 @@ export function Notices({ error, doneHash, warning, noRoute, tokenIn, tokenOut, 
 export function RouteIcon({ id, size = 32 }: { id: SwapProviderId; size?: number }) {
   const m = ROUTE_META[id]
   if (!m.logo) return <GradientIcon icon={m.icon} tone={m.tone} size={size} />
-  // The official logo, in a rounded tile. Fixed size and async decoding keep the list from shifting or stalling.
-  return (
-    // eslint-disable-next-line @next/next/no-img-element
-    <img
-      src={m.logo}
-      alt=""
-      width={size}
-      height={size}
-      decoding="async"
-      draggable={false}
-      className="flex-shrink-0 object-cover"
-      style={{ width: size, height: size, borderRadius: Math.round(size * 0.28), border: '1px solid var(--border)', background: '#fff', boxShadow: '0 6px 14px -8px rgba(15,23,42,0.35)' }}
-    />
-  )
+  return <LogoTile src={m.logo} size={size} />
 }
 
 /** Token logo with a small Arc badge in the corner, like the reference design. */

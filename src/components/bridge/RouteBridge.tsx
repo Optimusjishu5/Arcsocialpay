@@ -21,11 +21,12 @@ import { fieldClass, fieldLabel, fieldStyle } from '../pay/ShareLinkBox'
 import { ChainPicker } from './ChainPicker'
 import { GradientIcon, type Tone } from '../dashboard/ui'
 import { TxReceipt } from '../ui/TxReceipt'
+import { LogoTile } from '../ui/LogoTile'
 
-const PROVIDER_STYLE: Record<string, { icon: LucideIcon; tone: Tone }> = {
-  Across: { icon: Zap, tone: 'teal' },
-  Relay: { icon: Rocket, tone: 'violet' },
-  'LI.FI': { icon: Layers, tone: 'amber' },
+const PROVIDER_STYLE: Record<string, { icon: LucideIcon; tone: Tone; logo: string }> = {
+  Across: { icon: Zap, tone: 'teal', logo: '/routers/across.webp' },
+  Relay: { icon: Rocket, tone: 'violet', logo: '/routers/relay.webp' },
+  'LI.FI': { icon: Layers, tone: 'amber', logo: '/routers/lifi.webp' },
 }
 
 const QUOTE_MAX_AGE_MS = 60_000
@@ -78,6 +79,10 @@ export function RouteBridge() {
   const [delivery, setDelivery] = useState<DeliveryStatus | null>(null)
   const [error, setError] = useState('')
   const stopPoll = useRef(false)
+  // Prices load by themselves; this remembers which request was already asked for so it is not repeated.
+  const autoAsked = useRef('')
+  const autoRuns = useRef(0)
+  const manualPick = useRef(false)
 
   const fromChain = chains.find((c) => c.key === fromKey)
   const toChain = chains.find((c) => c.key === toKey)
@@ -126,7 +131,16 @@ export function RouteBridge() {
   const noGas = !!fromChain && fromChain.id !== ARC_CHAIN_ID && gasBalance === 0n
   const canQuote = isConnected && !!address && !!fromChain && !!toChain && !!fromUsdc && !!toUsdc && amountRaw !== null && !problem && !busy
 
-  function resetResults() { setResults(null); setPicked(null); setReqUsed(null); setError('') }
+  // Prices appear a moment after the details are filled in, without pressing anything. The button still refreshes them.
+  const askKey = canQuote ? `${fromKey}|${toKey}|${amount.trim()}|${recipient}|${address}` : ''
+  useEffect(() => {
+    if (!askKey || autoAsked.current === askKey || autoRuns.current >= 12) return
+    const t = setTimeout(() => { autoAsked.current = askKey; autoRuns.current += 1; void compare() }, 700)
+    return () => clearTimeout(t)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [askKey])
+
+  function resetResults() { setResults(null); setPicked(null); setReqUsed(null); setError(''); manualPick.current = false }
   function pickFrom(k: string) { if (k === toKey) setToKey(fromKey); setFromKey(k); setBalance(null); resetResults() }
   function pickTo(k: string) { if (k === fromKey) setFromKey(toKey); setToKey(k); setBalance(null); resetResults() }
   function flip() { setFromKey(toKey); setToKey(fromKey); setBalance(null); resetResults() }
@@ -138,19 +152,24 @@ export function RouteBridge() {
       fromChainId: fromChain.id, toChainId: toChain.id, fromToken: fromUsdc.address, toToken: toUsdc.address,
       amountRaw, user: address, recipient: (recipient || address) as `0x${string}`,
     }
+    manualPick.current = false
+    const arrived: ProviderResult[] = []
+    const rank = (list: ProviderResult[]) => list.slice().sort((a, b) => Number((b.quote?.amountOut ?? -1n) - (a.quote?.amountOut ?? -1n)))
+    // A quote that fails the safety checks is shown as unavailable, never offered.
+    const checked = (r: ProviderResult): ProviderResult => {
+      if (!r.quote) return r
+      const bad = validateRouteTxs(r.quote, req) ?? checkLifiTxs(r.quote) ?? (r.quote.amountOut <= 0n ? `${r.provider} returned no output for this route.` : null)
+      return bad ? { provider: r.provider, error: bad } : r
+    }
     try {
-      const raw = await getRouteQuotes(req)
-      // A quote that fails the safety checks is shown as unavailable, never offered.
-      const res: ProviderResult[] = raw.map((r) => {
-        if (!r.quote) return r
-        const bad = validateRouteTxs(r.quote, req) ?? checkLifiTxs(r.quote) ?? (r.quote.amountOut <= 0n ? `${r.provider} returned no output for this route.` : null)
-        return bad ? { provider: r.provider, error: bad } : r
+      await getRouteQuotes(req, (one) => {
+        arrived.push(checked(one))
+        const ranked = rank(arrived)
+        setReqUsed(req); setResults(ranked)
+        // The best price so far is picked, unless the person already chose a route themselves.
+        if (!manualPick.current) setPicked(ranked.find((r) => r.quote)?.quote ?? null)
       })
-      res.sort((a, b) => Number((b.quote?.amountOut ?? -1n) - (a.quote?.amountOut ?? -1n)))
-      setReqUsed(req); setResults(res)
-      const best = res.find((r) => r.quote)?.quote ?? null
-      setPicked(best)
-      if (!best) setError('None of LI.FI, Across or Relay can serve this route right now. Try another pair or amount.')
+      if (!arrived.some((r) => r.quote)) setError('None of LI.FI, Across or Relay can serve this route right now. Try another pair or amount.')
     } catch (e) {
       setError(kitErrorMessage(e))
     } finally {
@@ -272,23 +291,23 @@ export function RouteBridge() {
         {overWarn && <p className="text-xs" style={{ color: 'var(--danger)' }}>This is more than 100 USDC. Double-check the route before you confirm.</p>}
 
         <Button className="w-full" size="lg" variant={results ? 'secondary' : 'primary'} loading={phase === 'quoting'} disabled={!canQuote} onClick={() => void compare()}>
-          {results ? 'Refresh quotes' : amountRaw === null ? 'Enter an amount' : 'Find best route'}
+          {results ? 'Refresh quotes' : amountRaw === null ? 'Enter an amount' : phase === 'quoting' ? 'Finding the best route...' : 'Find best route'}
         </Button>
       </div>
 
-      {results && (
+      {(results || phase === 'quoting') && (
         <div className="space-y-2">
-          {results.map((r) => {
+          {(results ?? []).map((r) => {
             const q = r.quote
             const isPicked = !!q && picked?.provider === q.provider
             const style = PROVIDER_STYLE[r.provider]
             return (
-              <button key={r.provider} type="button" disabled={!q || busy} onClick={() => q && setPicked(q)} aria-pressed={isPicked}
+              <button key={r.provider} type="button" disabled={!q || busy} onClick={() => { if (q) { manualPick.current = true; setPicked(q) } }} aria-pressed={isPicked}
                 className="w-full text-left rounded-2xl p-4 transition-all disabled:cursor-default focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus)]"
                 style={{ background: 'var(--surface)', border: `1.5px solid ${isPicked ? 'var(--tone-to)' : 'var(--border)'}`, opacity: q ? 1 : 0.6 }}>
                 <div className="flex items-center justify-between gap-3">
                   <span className="font-semibold text-sm flex items-center gap-2.5 min-w-0" style={{ color: 'var(--ink)' }}>
-                    <GradientIcon icon={style.icon} tone={style.tone} size={32} />
+                    {style.logo ? <LogoTile src={style.logo} size={32} /> : <GradientIcon icon={style.icon} tone={style.tone} size={32} />}
                     {r.provider}
                     {q && best && q.provider === best.provider && (
                       <span className="text-xs px-2 py-0.5 rounded-full" style={{ background: 'var(--success-bg)', color: 'var(--success)' }}>Best rate</span>
@@ -312,6 +331,15 @@ export function RouteBridge() {
               </button>
             )
           })}
+          {phase === 'quoting' && (['Across', 'Relay', 'LI.FI'] as const).filter((p) => !results?.some((r) => r.provider === p)).map((p) => (
+            <div key={`wait-${p}`} className="w-full flex items-center justify-between gap-3 rounded-2xl p-4" style={{ background: 'var(--surface)', border: '1.5px solid var(--border)' }} aria-busy="true">
+              <span className="font-semibold text-sm flex items-center gap-2.5" style={{ color: 'var(--ink)' }}>
+                <LogoTile src={PROVIDER_STYLE[p].logo} size={32} />
+                {p}
+              </span>
+              <span className="h-5 w-24 rounded-lg animate-pulse" style={{ background: 'color-mix(in srgb, var(--tone-from) 22%, var(--surface-strong))' }} />
+            </div>
+          ))}
           {picked && nativeValue > 0n && (
             <p className="text-xs" style={{ color: 'var(--danger)' }}>
               This route also sends {formatUnits(nativeValue, fromChain?.nativeDecimals ?? 18)} {fromChain?.nativeSymbol} with the transaction.
