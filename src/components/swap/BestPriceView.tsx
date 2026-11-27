@@ -55,6 +55,19 @@ export function BestPriceView({ routes: fixedRoutes }: { routes?: readonly SwapP
 
   return (
     <div className="space-y-3">
+      {/* Every router that is asked for a price, always visible */}
+      <div className="flex flex-wrap items-center justify-center gap-2" aria-label="Routers compared">
+        {routes.map((r) => (
+          <span
+            key={r}
+            className="inline-flex h-8 items-center gap-1.5 rounded-full pl-1.5 pr-3 text-xs font-semibold"
+            style={{ background: 'var(--surface-strong)', border: '1px solid var(--border)', color: 'var(--ink)' }}
+          >
+            <RouteIcon id={r} size={20} />
+            {ROUTE_META[r].name}
+          </span>
+        ))}
+      </div>
       <div className="rounded-[32px] p-3 space-y-3" data-tc="" style={{ boxShadow: '0 30px 60px -36px var(--tone-glow)' }}>
         <div>
           <AmountCard
