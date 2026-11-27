@@ -12,6 +12,7 @@ const nextConfig = {
       { source: '/:file(logo.*|logofull.*|icon-.*|apple-touch-icon.*)', headers: cache },
       { source: '/chains/:path*', headers: cache },
       { source: '/tokens/:path*', headers: cache },
+      { source: '/routers/:path*', headers: cache },
     ]
   },
   // wagmi/viem/connectkit ship ESM — no extra transpilation needed on Next 15.

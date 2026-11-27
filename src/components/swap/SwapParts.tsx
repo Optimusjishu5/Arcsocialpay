@@ -11,11 +11,12 @@ import type { SwapProviderId, SwapQuote } from '../../lib/swapProviders'
 import { LogoImg } from '../ui/LogoImg'
 import { TxReceipt } from '../ui/TxReceipt'
 
-export const ROUTE_META: Record<SwapProviderId, { name: string; icon: LucideIcon; tone: Tone }> = {
-  uniswap: { name: 'Uniswap', icon: Sparkles, tone: 'pink' },
-  kyber: { name: 'KyberSwap', icon: Layers, tone: 'teal' },
-  lifi: { name: 'LI.FI', icon: Route, tone: 'violet' },
-  achswap: { name: 'AchSwap', icon: Zap, tone: 'amber' },
+/** `logo` is the provider's own logo (a 96px image, 1 to 2 KB). Providers without one show a colored icon. */
+export const ROUTE_META: Record<SwapProviderId, { name: string; icon: LucideIcon; tone: Tone; logo?: string }> = {
+  uniswap: { name: 'Uniswap', icon: Sparkles, tone: 'pink', logo: '/routers/uniswap.webp' },
+  kyber: { name: 'KyberSwap', icon: Layers, tone: 'teal', logo: '/routers/kyberswap.webp' },
+  lifi: { name: 'LI.FI', icon: Route, tone: 'violet', logo: '/routers/lifi.webp' },
+  achswap: { name: 'AchSwap', icon: Zap, tone: 'amber', logo: '/routers/achswap.webp' },
 }
 
 export function Row({ label, value, tone }: { label: string; value: string; tone?: 'bad' }) {
@@ -98,7 +99,21 @@ export function Notices({ error, doneHash, warning, noRoute, tokenIn, tokenOut, 
 
 export function RouteIcon({ id, size = 32 }: { id: SwapProviderId; size?: number }) {
   const m = ROUTE_META[id]
-  return <GradientIcon icon={m.icon} tone={m.tone} size={size} />
+  if (!m.logo) return <GradientIcon icon={m.icon} tone={m.tone} size={size} />
+  // The official logo, in a rounded tile. Fixed size and async decoding keep the list from shifting or stalling.
+  return (
+    // eslint-disable-next-line @next/next/no-img-element
+    <img
+      src={m.logo}
+      alt=""
+      width={size}
+      height={size}
+      decoding="async"
+      draggable={false}
+      className="flex-shrink-0 object-cover"
+      style={{ width: size, height: size, borderRadius: Math.round(size * 0.28), border: '1px solid var(--border)', background: '#fff', boxShadow: '0 6px 14px -8px rgba(15,23,42,0.35)' }}
+    />
+  )
 }
 
 /** Token logo with a small Arc badge in the corner, like the reference design. */

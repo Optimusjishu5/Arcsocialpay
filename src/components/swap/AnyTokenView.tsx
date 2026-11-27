@@ -11,7 +11,7 @@ import { useSwapEngine } from '../../hooks/useSwapEngine'
 import { cleanAmountInput, Reveal, SlippagePicker } from './SwapPanel'
 import { TokenLogo } from './TokenLogo'
 import { TokenPicker } from './TokenPicker'
-import { Notices, QuoteDetails, TokenWithChain } from './SwapParts'
+import { Notices, QuoteDetails, RouteIcon, TokenWithChain } from './SwapParts'
 
 const LIFI_ONLY: readonly SwapProviderId[] = ['lifi']
 const onLifi = (t: ArcToken) => t.sources.includes('lifi')
@@ -196,7 +196,9 @@ export function AnyTokenView() {
         <Button className="w-full !h-14 !rounded-2xl" size="lg" loading={working || (e.quoting && e.amountIn !== null)} disabled={!ready || working} onClick={() => void e.swap()}>
           {label}
         </Button>
-        <p className="text-xs text-right" style={{ color: 'var(--subtle)' }}>Powered by LI.FI. Mainnet swaps use real funds.</p>
+        <p className="flex items-center justify-end gap-1.5 text-xs text-right" style={{ color: 'var(--subtle)' }}>
+          <RouteIcon id="lifi" size={18} /> Powered by LI.FI. Mainnet swaps use real funds.
+        </p>
       </div>
 
       <TokenPicker
